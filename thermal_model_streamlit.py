@@ -49,13 +49,15 @@ room_height = st.sidebar.slider("Room Height (m)", 2.5, 5.0, 3.0, 0.5,
                                 help="Height affects air circulation and stratification")
 
 st.sidebar.subheader("🖥️ Server Racks")
-st.sidebar.caption("More racks or higher power = more heat")
+st.sidebar.caption("Configure rack layout")
 num_rows = st.sidebar.slider("Number of Rows", 1, 6, 3, 1,
                              help="Rows of server racks in the room")
 racks_per_row = st.sidebar.slider("Racks per Row", 5, 30, 20, 1,
                                   help="Number of server racks in each row")
-rack_power_kw = st.sidebar.slider("Power per Rack (kW)", 10.0, 55.0, 40.0, 5.0,
-                                  help="Electrical power consumed by each rack (becomes heat)")
+
+# Initialize session state for scheduled jobs
+if 'scheduled_jobs' not in st.session_state:
+    st.session_state.scheduled_jobs = []
 
 st.sidebar.subheader("❄️ Liquid Cooling")
 st.sidebar.caption("Captures heat before it reaches room air")
@@ -83,6 +85,233 @@ inlet_temp_c = st.sidebar.slider("Inlet Temperature (°C)", 18.0, 28.0, 23.3, 0.
                                 help="Temperature of cooling air entering the room")
 waste_threshold_c = st.sidebar.slider("Hot Spot Alert Threshold (°C)", 25.0, 35.0, 30.0, 1.0,
                                      help="Temperature above which areas are flagged as too hot")
+
+
+# ===== JOB SCHEDULING SECTION =====
+st.header("📅 Job Scheduler")
+st.markdown("Schedule GPU jobs throughout the day to see thermal impact over time")
+
+# Job scheduler UI
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.subheader("➕ Add New Job")
+
+    job_col1, job_col2, job_col3 = st.columns(3)
+
+    with job_col1:
+        job_start_time_input = st.time_input("Start Time",
+                                             value=None,
+                                             step=900,  # 15 minute increments
+                                             help="When the job starts (24-hour format)")
+
+    with job_col2:
+        job_duration_hours = st.number_input("Duration (hours)", min_value=0.5, max_value=24.0, value=2.0, step=0.5,
+                                            help="How long the job runs")
+
+    with job_col3:
+        gpu_power_level = st.selectbox("GPU Power Level",
+                                       options=["Low (20 kW)", "Medium (40 kW)", "High (55 kW)"],
+                                       index=1,
+                                       help="Power consumption per rack during job")
+        # Extract power value
+        power_map = {"Low (20 kW)": 20.0, "Medium (40 kW)": 40.0, "High (55 kW)": 55.0}
+        job_power_kw = power_map[gpu_power_level]
+
+    total_available_racks = num_rows * racks_per_row
+    job_num_racks = st.number_input("Number of Racks",
+                                   min_value=1,
+                                   max_value=total_available_racks,
+                                   value=min(10, total_available_racks),
+                                   step=1,
+                                   help=f"Number of racks needed (max {total_available_racks} available)")
+
+    # Add job button
+    add_button_disabled = job_start_time_input is None
+    if st.button("➕ Add Job", type="primary", use_container_width=True, disabled=add_button_disabled):
+        job_start_hour = job_start_time_input.hour
+        job_start_min = job_start_time_input.minute
+        job_start_time = job_start_hour + job_start_min / 60.0
+        job_end_time = job_start_time + job_duration_hours
+
+        new_job = {
+            'id': len(st.session_state.scheduled_jobs),
+            'start_hour': job_start_hour,
+            'start_min': job_start_min,
+            'start_time': job_start_time,
+            'duration': job_duration_hours,
+            'end_time': job_end_time,
+            'power_kw': job_power_kw,
+            'num_racks': job_num_racks,
+            'power_level': gpu_power_level
+        }
+        st.session_state.scheduled_jobs.append(new_job)
+        st.rerun()
+
+with col2:
+    st.subheader("⚡ Current Status")
+    st.metric("Total Jobs", len(st.session_state.scheduled_jobs))
+    st.metric("Available Racks", f"{total_available_racks}")
+
+    # Play button (placeholder for now)
+    st.markdown("---")
+    play_button = st.button("▶️ Run Simulation", type="secondary", use_container_width=True, disabled=len(st.session_state.scheduled_jobs) == 0)
+    if play_button:
+        st.info("⏳ Simulation feature coming soon!")
+
+# Display scheduled jobs in calendar-style view
+if len(st.session_state.scheduled_jobs) > 0:
+    st.subheader("📋 Scheduled Jobs Timeline")
+
+    # Sort jobs by start time
+    sorted_jobs = sorted(st.session_state.scheduled_jobs, key=lambda x: x['start_time'])
+
+    # Build job blocks HTML
+    job_blocks_html = ""
+    for job_idx, job in enumerate(sorted_jobs):
+        start_pct = (job['start_time'] / 24) * 100
+        duration_pct = (job['duration'] / 24) * 100
+
+        # Offset jobs vertically if they overlap
+        top_position = 10 + (job_idx % 2) * 55  # Alternate between two rows
+
+        job_class = "job-low" if "Low" in job['power_level'] else "job-medium" if "Medium" in job['power_level'] else "job-high"
+        job_emoji = "🟢" if "Low" in job['power_level'] else "🟡" if "Medium" in job['power_level'] else "🔴"
+
+        job_blocks_html += f'<div class="job-block {job_class}" style="left: {start_pct}%; width: {duration_pct}%; top: {top_position}px;">{job_emoji} Job {job_idx + 1}</div>'
+
+    # Build hour labels HTML
+    hour_labels_html = ""
+    for hour in range(24):
+        hour_labels_html += f'<div class="timeline-hour">{hour:02d}</div>'
+
+    # Create complete calendar HTML
+    calendar_html = f"""
+    <style>
+        .calendar-container {{
+            background: linear-gradient(180deg, #2d3436 0%, #34495e 100%);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 10px 0;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }}
+        .timeline-grid {{
+            position: relative;
+            height: 150px;
+            background: repeating-linear-gradient(
+                90deg,
+                rgba(255,255,255,0.05) 0px,
+                rgba(255,255,255,0.05) 1px,
+                transparent 1px,
+                transparent calc(100% / 24)
+            );
+            border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            margin: 15px 0;
+        }}
+        .timeline-hours {{
+            display: flex;
+            justify-content: space-between;
+            color: #bdc3c7;
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            padding: 0 5px;
+        }}
+        .timeline-hour {{
+            width: calc(100% / 24);
+            text-align: center;
+        }}
+        .job-block {{
+            position: absolute;
+            height: 50px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 13px;
+            color: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            border: 2px solid rgba(255,255,255,0.3);
+            transition: transform 0.2s;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }}
+        .job-block:hover {{
+            transform: scale(1.03);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+        }}
+        .job-low {{
+            background: linear-gradient(135deg, #00b894 0%, #00cec9 100%);
+        }}
+        .job-medium {{
+            background: linear-gradient(135deg, #fdcb6e 0%, #f39c12 100%);
+        }}
+        .job-high {{
+            background: linear-gradient(135deg, #ff7675 0%, #d63031 100%);
+        }}
+        .job-details {{
+            background: rgba(44, 62, 80, 0.95);
+            border-radius: 8px;
+            padding: 12px 15px;
+            margin: 10px 0;
+            border-left: 4px solid #3498db;
+            color: #ecf0f1;
+            font-size: 14px;
+        }}
+        .job-details strong {{
+            color: #3498db;
+        }}
+    </style>
+    <div class="calendar-container">
+        <div class="timeline-hours">
+            {hour_labels_html}
+        </div>
+        <div class="timeline-grid">
+            {job_blocks_html}
+        </div>
+    </div>
+    """
+
+    st.markdown(calendar_html, unsafe_allow_html=True)
+
+    # Job details list
+    st.markdown("### Job Details")
+    for job_idx, job in enumerate(sorted_jobs):
+        job_emoji = "🟢" if "Low" in job['power_level'] else "🟡" if "Medium" in job['power_level'] else "🔴"
+
+        col1, col2 = st.columns([5, 1])
+
+        with col1:
+            st.markdown(f"""
+            <div class="job-details">
+                <strong>{job_emoji} Job {job_idx + 1}:</strong>
+                {job['start_hour']:02d}:{job['start_min']:02d} → {int(job['end_time']):02d}:{int((job['end_time'] % 1) * 60):02d}
+                ({job['duration']:.1f}h) |
+                {job['power_level']} |
+                {job['num_racks']} racks |
+                {job['num_racks'] * job['power_kw']:.0f} kW total
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col2:
+            if st.button("🗑️ Remove", key=f"delete_{job_idx}", use_container_width=True):
+                st.session_state.scheduled_jobs.remove(job)
+                st.rerun()
+
+    # Clear all button
+    st.markdown("")
+    if st.button("🗑️ Clear All Jobs", type="secondary", use_container_width=False):
+        st.session_state.scheduled_jobs = []
+        st.rerun()
+else:
+    st.info("📅 No jobs scheduled yet. Add your first job above to get started!")
+
+st.divider()
+
+# For now, use default rack power for the thermal calculation below
+# This will be replaced with scheduled job data when simulation runs
+rack_power_kw = 40.0  # Default power level
 
 
 def calculate_thermal_system(room_length, room_width, room_height,
