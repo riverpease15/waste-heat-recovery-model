@@ -22,6 +22,10 @@ RHO = 1.184      # Air density kg/m³
 CP = 1007.0      # Specific heat capacity J/(kg·K)
 K_AIR = 0.026    # Thermal conductivity W/(m·K)
 
+# CODA room dimensions
+room_length = 23.5712
+room_width = 27.1272
+
 st.title("🌡️ ATL01 PACE Room - Thermal Model")
 st.markdown("**Interactive thermal analysis for high-density data center cooling**")
 with st.expander("ℹ️ How to use this model", expanded=False):
@@ -39,12 +43,12 @@ with st.expander("ℹ️ How to use this model", expanded=False):
 # Sidebar controls
 st.sidebar.header("⚙️ Configuration")
 
-st.sidebar.subheader("📐 Room Dimensions")
-st.sidebar.caption("Larger rooms have lower power density")
-room_length = st.sidebar.slider("Room Length (m)", 10.0, 30.0, 15.0, 1.0,
-                                help="Length affects total room volume and power density")
-room_width = st.sidebar.slider("Room Width (m)", 5.0, 20.0, 10.0, 1.0,
-                               help="Width affects total room volume and power density")
+st.sidebar.subheader("📐 Room Height")
+# st.sidebar.caption("Larger rooms have lower power density")
+# room_length = st.sidebar.slider("Room Length (m)", 10.0, 30.0, 15.0, 1.0,
+#                                 help="Length affects total room volume and power density")
+# room_width = st.sidebar.slider("Room Width (m)", 5.0, 20.0, 10.0, 1.0,
+#                                help="Width affects total room volume and power density")
 room_height = st.sidebar.slider("Room Height (m)", 2.5, 5.0, 3.0, 0.5,
                                 help="Height affects air circulation and stratification")
 
@@ -334,10 +338,10 @@ def calculate_thermal_system(room_length, room_width, room_height,
     """
 
     # === RACK LAYOUT ===
-    RACK_WIDTH = 0.6
-    RACK_DEPTH = 1.0
+    RACK_WIDTH = 0.762
+    RACK_DEPTH = 1.1684
     CLEARANCE = 1.5
-    AISLE_WIDTH = 1.0
+    AISLE_WIDTH = 1.2446
 
     RACKS = []
     available_length = room_length - 2 * CLEARANCE
@@ -460,17 +464,56 @@ def calculate_thermal_system(room_length, room_width, room_height,
     total_facility_power_w = Q_TOTAL_W * (1 + total_overhead_fraction)
     pue = total_facility_power_w / Q_TOTAL_W if Q_TOTAL_W > 0 else 1.0
     
+    # Air handler physical dimensions (meters)
+    AHU_LENGTH = 1.6256
+    AHU_WIDTH = 2.7432
+
     # === EQUIPMENT POSITIONS ===
     AIR_HANDLERS = []
+    # if num_air_handlers >= 1:
+    #     AIR_HANDLERS.append({'x': 0.7, 'y': room_width/2, 'width': 1.0, 'height': 2.0, 'side': 'left'})
+    # if num_air_handlers >= 2:
+    #     AIR_HANDLERS.append({'x': room_length - 0.7, 'y': room_width/2, 'width': 1.0, 'height': 2.0, 'side': 'right'})
+    # if num_air_handlers >= 3:
+    #     AIR_HANDLERS.append({'x': room_length/2, 'y': 0.7, 'width': 2.0, 'height': 1.0, 'side': 'top'})
+    # if num_air_handlers >= 4:
+    #     AIR_HANDLERS.append({'x': room_length/2, 'y': room_width - 0.7, 'width': 2.0, 'height': 1.0, 'side': 'bottom'})
     if num_air_handlers >= 1:
-        AIR_HANDLERS.append({'x': 0.7, 'y': room_width/2, 'width': 1.0, 'height': 2.0, 'side': 'left'})
+        AIR_HANDLERS.append({
+            'x': 0.7,
+            'y': room_width/2,
+            'width': AHU_LENGTH,
+            'height': AHU_WIDTH,
+            'side': 'left'
+        })
+
     if num_air_handlers >= 2:
-        AIR_HANDLERS.append({'x': room_length - 0.7, 'y': room_width/2, 'width': 1.0, 'height': 2.0, 'side': 'right'})
+        AIR_HANDLERS.append({
+            'x': room_length - 0.7,
+            'y': room_width/2,
+            'width': AHU_LENGTH,
+            'height': AHU_WIDTH,
+            'side': 'right'
+        })
+
     if num_air_handlers >= 3:
-        AIR_HANDLERS.append({'x': room_length/2, 'y': 0.7, 'width': 2.0, 'height': 1.0, 'side': 'top'})
+        AIR_HANDLERS.append({
+            'x': room_length/2,
+            'y': 0.7,
+            'width': AHU_WIDTH,  # swapped because this AHU is rotated
+            'height': AHU_LENGTH,
+            'side': 'top'
+        })
+
     if num_air_handlers >= 4:
-        AIR_HANDLERS.append({'x': room_length/2, 'y': room_width - 0.7, 'width': 2.0, 'height': 1.0, 'side': 'bottom'})
-    
+        AIR_HANDLERS.append({
+            'x': room_length/2,
+            'y': room_width - 0.7,
+            'width': AHU_WIDTH,
+            'height': AHU_LENGTH,
+            'side': 'bottom'
+        })
+
     HX_POSITIONS = []
     if num_heat_exchangers >= 1:
         HX_POSITIONS.append({'x': room_length * 0.25, 'y': 0.7, 'width': 1.2, 'height': 0.6})
