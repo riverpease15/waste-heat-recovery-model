@@ -3,7 +3,7 @@
 **Interactive physics-based thermal analysis for high-density data center cooling and waste heat recovery**
 
 ![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
-![Streamlit](https://img.shields.io/badge/streamlit-1.45+-red.svg)
+![Streamlit](https://img.shields.io/badge/streamlit-1.28+-red.svg)
 
 ## Overview
 
@@ -11,6 +11,7 @@ This model simulates heat flow through the ATL01 PACE Room data center using rea
 
 **Key Features:**
 - 🌡️ Real-time thermal visualization with hot zone detection
+- 📅 **Job Scheduler** — schedule GPU jobs and see thermal impact over time
 - ⚡ Physics-based calculations (Q = ṁ × Cp × ΔT)
 - ♻️ Waste heat recovery analysis (kW available for reuse)
 - 🎛️ Interactive controls for all system parameters
@@ -56,18 +57,31 @@ streamlit run thermal_model_streamlit.py
 
 **Sidebar Controls** (adjust to explore scenarios):
 - 📐 **Room Dimensions**: Change room size (affects power density)
-- 🖥️ **Server Racks**: Number and power of racks (heat sources)
+- 🖥️ **Server Racks**: Number of rows and racks per row (heat sources)
 - ❄️ **Liquid Cooling**: DCLC and RDHX effectiveness (heat capture)
 - ♻️ **Waste Heat Recovery**: Heat exchangers for building heating
-- 💨 **Air Handling**: Airflow and circulation
-- 🌡️ **Temperature**: Inlet temperature and alert thresholds
+- 💨 **Air Handling**: Number of air handlers and airflow per unit
+- 🌡️ **Temperature**: Inlet temperature and hot spot alert thresholds
 
 **Main Display**:
-- **Thermal Map**: Visual temperature distribution
-- **Hot Zones Map**: Areas exceeding threshold
-- **Key Metrics**: Temperature, PUE, efficiency
+- **📅 Job Scheduler**: Schedule GPU jobs with different power levels
+- **Thermal Map**: Visual temperature distribution across the room
+- **Hot Zones Map**: Areas exceeding temperature threshold
+- **Key Metrics**: Temperature, PUE, efficiency percentages
 - **Heat Flow Diagram**: Visual heat progression through cooling stages
 - **Recommendations**: System status and improvement suggestions
+
+### Job Scheduler
+
+The job scheduler lets you plan GPU workloads throughout the day:
+
+1. **Add a Job**: Set start time, duration (0.5–24 hours), power level (Low/Medium/High), and number of racks
+2. **View Timeline**: Jobs appear on a 24-hour visual calendar with color-coded power levels:
+   - 🟢 **Low** (20 kW/rack) — light workloads
+   - 🟡 **Medium** (40 kW/rack) — typical GPU jobs
+   - 🔴 **High** (55 kW/rack) — intensive training/inference
+3. **Manage Jobs**: Remove individual jobs or clear all
+4. **Run Simulation**: See how scheduled jobs affect thermal conditions over time
 
 ### Getting Started
 
@@ -75,7 +89,8 @@ streamlit run thermal_model_streamlit.py
 2. **Hover over ⓘ icons** to understand what each parameter means
 3. **Adjust one slider at a time** to see its effect
 4. **Watch the thermal map** update in real-time
-5. **Try adding heat exchangers** to see waste heat recovery potential
+5. **Schedule some jobs** to explore time-varying thermal loads
+6. **Try adding heat exchangers** to see waste heat recovery potential
 
 ## Example Scenarios
 
@@ -103,9 +118,21 @@ streamlit run thermal_model_streamlit.py
 - Room temperature decreases slightly
 - Less heat burden on air handlers
 
-### Scenario 3: High-Density Upgrade
-**Increase rack power:**
-- Change rack power from 40 kW → 50 kW
+### Scenario 3: Schedule Mixed Workloads
+**Use the Job Scheduler:**
+- Add a morning job: 8:00 AM, 4 hours, High power, 20 racks
+- Add an afternoon job: 1:00 PM, 3 hours, Medium power, 15 racks
+- Add an overnight job: 10:00 PM, 8 hours, Low power, 30 racks
+
+**Observe:**
+- Timeline shows job distribution across the day
+- Total power consumption varies by time slot
+- Plan cooling capacity for peak periods
+
+### Scenario 4: High-Density Upgrade
+**Increase rack count:**
+- Change racks per row from 20 → 25
+- Add another row (3 → 4 rows)
 
 **Observe:**
 - Temperature increases
@@ -117,7 +144,7 @@ streamlit run thermal_model_streamlit.py
 - Add more air handlers (2 → 3)
 - Increase RDHX effectiveness (90% → 95%)
 
-### Scenario 4: Room Expansion
+### Scenario 5: Room Expansion
 **Double the room size:**
 - Length: 15m → 20m
 - Width: 10m → 15m
@@ -217,9 +244,10 @@ PUE = (IT Power + Cooling Power) / IT Power
 ## Dependencies
 
 ```
-streamlit>=1.45.0    # Web interface
+streamlit>=1.28.0    # Web interface
 numpy>=1.24.0        # Numerical calculations
 matplotlib>=3.7.0    # Thermal visualizations
+pandas>=2.0.0        # Data handling
 ```
 
 All dependencies are listed in `requirements.txt` and installed automatically by `run_app.sh`.
@@ -229,7 +257,7 @@ All dependencies are listed in `requirements.txt` and installed automatically by
 ### App won't start
 ```bash
 # Update dependencies
-pip install --upgrade streamlit numpy matplotlib
+pip install --upgrade streamlit numpy matplotlib pandas
 
 # Try running manually
 streamlit run thermal_model_streamlit.py
@@ -287,7 +315,7 @@ waste-heat-recovery-model/
 
 4. **Air Handlers**
    - Circulate and cool room air
-   - Typical capacity: 100,000-250,000 CFM each
+   - Typical capacity: 20,000-250,000 CFM each
    - Handles heat not captured by liquid cooling
 
 ### Temperature Field Generation
@@ -314,6 +342,7 @@ The thermal map uses physics-based heat distribution:
 - Plan cooling upgrades before implementation
 - Estimate waste heat recovery potential
 - Optimize PUE and energy efficiency
+- **Schedule and plan job loads** to manage peak thermal periods
 
 ### For Engineers
 - Understand trade-offs between cooling methods
@@ -340,4 +369,4 @@ This project is for educational and research purposes. Validated against Georgia
 
 ---
 
-**Version 2.0** • Physics-verified • Energy-conserved • Validated against real facility
+**Version 2.1** • Physics-verified • Energy-conserved • Job Scheduler • Validated against real facility
