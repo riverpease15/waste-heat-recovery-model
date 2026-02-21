@@ -54,6 +54,15 @@ num_rows = st.sidebar.slider("Number of Rows", 1, 6, 3, 1,
                              help="Rows of server racks in the room")
 racks_per_row = st.sidebar.slider("Racks per Row", 5, 30, 20, 1,
                                   help="Number of server racks in each row")
+#based on senario A vs B in updating params for model 3
+scenario = st.sidebar.selectbox(
+    "IT Density Scenario",
+    [
+        "Current CODA (~1.4 MW)",
+        "Mixed Density (~1.6 MW)",
+        "Full High-Density (~2.9 MW)"
+    ]
+)
 
 # Initialize session state for scheduled jobs
 if 'scheduled_jobs' not in st.session_state:
@@ -61,9 +70,10 @@ if 'scheduled_jobs' not in st.session_state:
 
 st.sidebar.subheader("❄️ Liquid Cooling")
 st.sidebar.caption("Captures heat before it reaches room air")
-dclc_effectiveness = st.sidebar.slider("DCLC (Direct Liquid Cooling)", 0.0, 0.50, 0.20, 0.05,
+#changed these options to be a little more realstic based on updated params
+dclc_effectiveness = st.sidebar.slider("DCLC (Direct Liquid Cooling)", 0.0, 0.60, 0.35, 0.05,
                                       help="% of heat captured by cold plates at CPUs/GPUs. Higher = more efficient")
-rdhx_effectiveness = st.sidebar.slider("RDHX (Rear Door Heat Exchanger)", 0.0, 0.97, 0.90, 0.05,
+rdhx_effectiveness = st.sidebar.slider("RDHX (Rear Door Heat Exchanger)", 0.0, 0.98, 0.92, 0.02,
                                       help="% of rack exhaust heat captured by door-mounted exchangers")
 
 st.sidebar.subheader("♻️ Waste Heat Recovery")
@@ -309,9 +319,30 @@ else:
 
 st.divider()
 
-# For now, use default rack power for the thermal calculation below
-# This will be replaced with scheduled job data when simulation runs
-rack_power_kw = 40.0  # Default power level
+#Estimated calculations based on tour info and other similar data centers:
+# CODA Rack Density Model:
+CHASSIS_POWER_KW = 9.0          # 8–10 kW average range
+CHASSIS_PER_RACK = 7            # 42U / 6U
+FULL_GPU_RACK_KW = CHASSIS_POWER_KW * CHASSIS_PER_RACK  # ~63 kW
+
+CPU_DOMINANT_RACK_KW = 15.0     # mixed CPU racks (your estimate)
+MIXED_GPU_RACK_KW = 40.0        # conservative GPU racks
+
+# # For now, use default rack power for the thermal calculation below
+# # This will be replaced with scheduled job data when simulation runs
+# rack_power_kw = FULL_GPU_RACK_KW
+
+# Change Rack Power Based on IT Density Scenario
+total_racks = num_rows * racks_per_row
+
+if scenario == "Current CODA (~1.4 MW)":
+    rack_power_kw = 1400 / total_racks   # 1.4 MW total
+
+elif scenario == "Mixed Density (~1.6 MW)":
+    rack_power_kw = 1600 / total_racks   # 1.6 MW total
+
+elif scenario == "Full High-Density (~2.9 MW)":
+    rack_power_kw = 2900 / total_racks   # 2.9 MW total
 
 
 def calculate_thermal_system(room_length, room_width, room_height,
@@ -360,6 +391,10 @@ def calculate_thermal_system(room_length, room_width, room_height,
 
     # === HEAT GENERATION ===
     Q_TOTAL_W = total_racks * rack_power_kw * 1000  # Total IT load in Watts
+    CODA_TOTAL_CAPACITY_KW = 7100  # 7.1 MW
+
+    if Q_TOTAL_W / 1000 > CODA_TOTAL_CAPACITY_KW:
+        st.warning("⚠️ IT load exceeds CODA 7.1 MW design capacity!")
 
     # === HEAT DISTRIBUTION (Multi-Stage Cooling) ===
     # Stage 1: DCLC captures heat directly at CPU/GPU via cold plates
@@ -416,7 +451,8 @@ def calculate_thermal_system(room_length, room_width, room_height,
     # Heat concentrated in exhaust stream from racks
     if total_racks > 0:
         # Estimate rack airflow (typically 200-400 CFM per kW)
-        rack_cfm_per_kw = 250  # CFM/kW (typical for high-density racks)
+        # high-density GPU rack airflow updated for params (300–400 CFM per kW is typical)
+        rack_cfm_per_kw = 325  # CFM/kW (typical for high-density racks)
         total_rack_cfm = Q_TOTAL_W / 1000 * rack_cfm_per_kw
         rack_volumetric_flow_m3s = total_rack_cfm / 2119.0
         rack_mass_flow_kg_s = rack_volumetric_flow_m3s * RHO
@@ -451,7 +487,7 @@ def calculate_thermal_system(room_length, room_width, room_height,
     # Additional overhead from air handler power
     if num_air_handlers > 0:
         # Fan power ≈ 0.5-1.0 W per CFM for large air handlers
-        fan_power_w = total_cfm * 0.75  # 0.75 W/CFM
+        fan_power_w = total_cfm * 0.55  # 0.75 W/CFM (updated to 0.55 for params)
         fan_overhead = fan_power_w / Q_TOTAL_W if Q_TOTAL_W > 0 else 0
     else:
         fan_overhead = 0
@@ -499,7 +535,8 @@ def calculate_thermal_system(room_length, room_width, room_height,
 
         # Heat intensity based on rack power and distance
         # Using 1/r² decay modified by exponential for numerical stability
-        heat_plume_temp = rack['power_kw'] * heat_fraction * 0.08  # °C per kW escaping
+        #Updated to work for newer params
+        heat_plume_temp = rack['power_kw'] * heat_fraction * 0.04  # °C per kW escaping
         spatial_decay = np.exp(-(dist / 0.8)**2)  # Gaussian plume
         T += heat_plume_temp * spatial_decay
 
@@ -759,16 +796,21 @@ with col3:
              help="Final heat managed by air circulation")
 
 # Waste Heat Recovery Section
+
+# Realistic Annual Utilization based on new params:
+ANNUAL_LOAD_FACTOR = 0.8   # 80% utilization typical for HPC environments
+annual_mwh = results['Q_liquid_cooling_kw'] * 8760 * ANNUAL_LOAD_FACTOR / 1000
+
 if num_heat_exchangers > 0:
     st.success(f"""
-    ♻️ **Waste Heat Recovery Active:** {results['Q_liquid_cooling_kw']:.0f} kW available for reuse
+    ♻️ **Waste Heat Recovery Active:** {annual_mwh:.0f} kW available for reuse
 
     This heat can be used for:
     - Building heating (e.g., CODA building)
     - Hot water generation
     - District heating systems
 
-    **Annual Energy Savings:** ~{results['Q_liquid_cooling_kw'] * 8760 / 1000:.0f} MWh/year
+    **Annual Energy Savings:** ~{annual_mwh:.0f} MWh/year
     """)
 else:
     st.info(f"""
@@ -777,7 +819,7 @@ else:
     Currently {results['Q_liquid_cooling_kw']:.0f} kW of heat is being removed but not reused.
     Add heat exchangers in the sidebar to capture this energy for building heating.
 
-    **Potential savings:** ~{results['Q_liquid_cooling_kw'] * 8760 / 1000:.0f} MWh/year
+    **Potential savings:** ~{annual_mwh:.0f} MWh/year
     """)
 
 # Recommendations
