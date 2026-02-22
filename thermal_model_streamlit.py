@@ -54,15 +54,6 @@ num_rows = st.sidebar.slider("Number of Rows", 1, 6, 3, 1,
                              help="Rows of server racks in the room")
 racks_per_row = st.sidebar.slider("Racks per Row", 5, 30, 20, 1,
                                   help="Number of server racks in each row")
-#based on senario A vs B in updating params for model 3
-scenario = st.sidebar.selectbox(
-    "IT Density Scenario",
-    [
-        "Current CODA (~1.4 MW)",
-        "Mixed Density (~1.6 MW)",
-        "Full High-Density (~2.9 MW)"
-    ]
-)
 
 # Initialize session state for scheduled jobs
 if 'scheduled_jobs' not in st.session_state:
@@ -341,18 +332,8 @@ MIXED_GPU_RACK_KW = 40.0        # conservative GPU racks
 # # For now, use default rack power for the thermal calculation below
 # # This will be replaced with scheduled job data when simulation runs
 # rack_power_kw = FULL_GPU_RACK_KW
-
-# Change Rack Power Based on IT Density Scenario
 total_racks = num_rows * racks_per_row
-
-if scenario == "Current CODA (~1.4 MW)":
-    rack_power_kw = 1400 / total_racks   # 1.4 MW total
-
-elif scenario == "Mixed Density (~1.6 MW)":
-    rack_power_kw = 1600 / total_racks   # 1.6 MW total
-
-elif scenario == "Full High-Density (~2.9 MW)":
-    rack_power_kw = 2900 / total_racks   # 2.9 MW total
+rack_power_kw = FULL_GPU_RACK_KW
 
 
 def calculate_thermal_system(room_length, room_width, room_height,
