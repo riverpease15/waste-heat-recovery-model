@@ -41,11 +41,11 @@ st.sidebar.header("⚙️ Configuration")
 
 st.sidebar.subheader("📐 Room Dimensions")
 st.sidebar.caption("Larger rooms have lower power density")
-room_length = st.sidebar.slider("Room Length (m)", 10.0, 30.0, 15.0, 1.0,
+room_length = st.sidebar.slider("Room Length (m)", 10.0, 40.0, 27.1, 0.1,
                                 help="Length affects total room volume and power density")
-room_width = st.sidebar.slider("Room Width (m)", 5.0, 20.0, 10.0, 1.0,
+room_width = st.sidebar.slider("Room Width (m)", 5.0, 30.0, 23.6, 0.1,
                                help="Width affects total room volume and power density")
-room_height = st.sidebar.slider("Room Height (m)", 2.5, 5.0, 3.0, 0.5,
+room_height = st.sidebar.slider("Room Height (m)", 2.5, 8.0, 6.4, 0.1,
                                 help="Height affects air circulation and stratification")
 
 st.sidebar.subheader("🖥️ Server Racks")
@@ -95,6 +95,16 @@ inlet_temp_c = st.sidebar.slider("Inlet Temperature (°C)", 18.0, 28.0, 23.3, 0.
                                 help="Temperature of cooling air entering the room")
 waste_threshold_c = st.sidebar.slider("Hot Spot Alert Threshold (°C)", 25.0, 35.0, 30.0, 1.0,
                                      help="Temperature above which areas are flagged as too hot")
+
+# 24-hour outdoor temperature profile for typical Atlanta July day
+# T_outdoor(t) = 26.5 + 5.5 × sin(2π(t - 9)/24)
+# Low ~21°C at 5AM, high ~32°C at 3PM
+outdoor_temp_profile = {
+    hour: 26.5 + 5.5 * np.sin(2 * np.pi * (hour - 9) / 24)
+    for hour in np.arange(0, 24, 0.5)
+}
+# Default to peak hour (3PM) for steady-state calculation
+time_of_day = 15.0
 
 
 # ===== JOB SCHEDULING SECTION =====
@@ -349,7 +359,8 @@ def calculate_thermal_system(room_length, room_width, room_height,
                              num_rows, racks_per_row, rack_power_kw,
                              rdhx_effectiveness, dclc_effectiveness, num_air_handlers,
                              num_heat_exchangers, hx_capacity_kw,
-                             inlet_temp_c, waste_threshold_c, cfm_per_handler):
+                             inlet_temp_c, waste_threshold_c, cfm_per_handler,
+                             time_of_day):
     """Calculate thermal system with physically accurate equations
 
     Heat Flow Stages:
@@ -358,9 +369,14 @@ def calculate_thermal_system(room_length, room_width, room_height,
     3. Heat Exchangers - remove additional heat from room air
     4. Air Handlers - circulate air and remove remaining heat
 
+    Building Envelope:
+    - Exterior wall heat gain/loss: Q_walls = U × A × (T_outdoor - T_room)
+    - Floor heat loss to ground: Q_floor = U × A × (T_room - T_ground)
+    - Outdoor temperature follows sinusoidal 24h profile for Atlanta July
+
     Physics:
     - Q = m_dot × Cp × ΔT (heat transfer equation)
-    - Room temperature depends on heat load, airflow rate, and room volume
+    - Room temperature depends on heat load, airflow rate, envelope, and room volume
     - All configurable parameters affect the final outcome
     """
 
@@ -433,19 +449,40 @@ def calculate_thermal_system(room_length, room_width, room_height,
         mass_flow_kg_s = volumetric_flow_m3s * RHO
         total_cfm = volumetric_flow_m3s * 2119
 
+    # === BUILDING ENVELOPE ===
+    # Outdoor temperature: sinusoidal 24h profile for typical Atlanta July day
+    T_outdoor_c = 26.5 + 5.5 * np.sin(2 * np.pi * (time_of_day - 9) / 24)
+
+    # Envelope U-values and areas
+    UA_WALLS = 0.19 * 347    # W/K — two exterior walls, 2 × 27.1m × 6.4m = 347 m²
+    UA_FLOOR = 0.5 * 640     # W/K — floor slab, 640 m²
+    T_GROUND = 17.0          # °C — constant ground temperature
+
+    # Thermal capacitance (for future time-domain simulation)
+    THERMAL_CAPACITANCE_MJK = RHO * 4096 * CP / 1e6  # ρ × V × Cp = 4.88 MJ/K
+
     # === PHYSICS-BASED TEMPERATURE CALCULATION ===
-    # Heat remaining to be handled by room air circulation
-    Q_REMAINING_W = Q_TO_ROOM_AIR_W
+    # Heat remaining from IT load to be handled by room air
+    Q_REMAINING_IT_W = Q_TO_ROOM_AIR_W
 
-    # Calculate temperature rise using Q = m_dot × Cp × ΔT
-    # Rearranged: ΔT = Q / (m_dot × Cp)
-    if mass_flow_kg_s > 0 and Q_REMAINING_W > 0:
-        delta_t_airflow = Q_REMAINING_W / (mass_flow_kg_s * CP)
-    else:
-        delta_t_airflow = 0.0
+    # Solve for T_room analytically including envelope:
+    #   T_room = T_inlet + (Q_remaining_IT + Q_walls - Q_floor) / (m_dot × Cp)
+    # where Q_walls = UA_WALLS × (T_outdoor - T_room)
+    #       Q_floor = UA_FLOOR × (T_room - T_ground)
+    # Both depend on T_room, so rearrange:
+    #   T_room × (m_dot×Cp + UA_WALLS + UA_FLOOR) =
+    #       T_inlet × m_dot×Cp + Q_remaining_IT + UA_WALLS × T_outdoor + UA_FLOOR × T_ground
+    m_dot_Cp = mass_flow_kg_s * CP if mass_flow_kg_s > 0 else 1.0  # avoid div-by-zero
 
-    # Room average temperature (well-mixed assumption)
-    T_room_c = inlet_temp_c + delta_t_airflow
+    T_room_c = (inlet_temp_c * m_dot_Cp + Q_REMAINING_IT_W
+                + UA_WALLS * T_outdoor_c + UA_FLOOR * T_GROUND) / (m_dot_Cp + UA_WALLS + UA_FLOOR)
+
+    # Now compute actual envelope heat flows at the solved T_room
+    Q_WALLS_W = UA_WALLS * (T_outdoor_c - T_room_c)   # positive = heat entering room
+    Q_FLOOR_W = UA_FLOOR * (T_room_c - T_GROUND)       # positive = heat leaving room
+
+    # Effective delta-T seen by air handlers (includes envelope effects)
+    delta_t_airflow = T_room_c - inlet_temp_c
 
     # Rack exhaust temperature (before RDHX cooling)
     # Heat concentrated in exhaust stream from racks
@@ -583,7 +620,11 @@ def calculate_thermal_system(room_length, room_width, room_height,
         'Q_liquid_cooling_kw': Q_LIQUID_COOLING_W / 1000,
         'Q_to_air_before_hx_kw': Q_TO_AIR_BEFORE_HX_W / 1000,
         'Q_hx_removed_kw': Q_HX_REMOVED_W / 1000,
-        'Q_remaining_kw': Q_REMAINING_W / 1000,
+        'Q_remaining_kw': Q_REMAINING_IT_W / 1000,
+        'Q_walls_kw': Q_WALLS_W / 1000,
+        'Q_floor_kw': Q_FLOOR_W / 1000,
+        'T_outdoor': T_outdoor_c,
+        'thermal_capacitance_MJK': THERMAL_CAPACITANCE_MJK,
         'mass_flow_kg_s': mass_flow_kg_s,
         'volumetric_flow_m3s': volumetric_flow_m3s,
         'cfm': total_cfm,
@@ -729,7 +770,8 @@ results = calculate_thermal_system(
     num_rows, racks_per_row, rack_power_kw,
     rdhx_effectiveness, dclc_effectiveness, num_air_handlers,
     num_heat_exchangers, hx_capacity_kw,
-    inlet_temp_c, waste_threshold_c, cfm_per_handler
+    inlet_temp_c, waste_threshold_c, cfm_per_handler,
+    time_of_day
 )
 
 # Display plots
@@ -794,6 +836,25 @@ with col3:
     st.caption("↓")
     st.metric("💨 To Air Handlers", f"{results['Q_remaining_kw']:.0f} kW",
              help="Final heat managed by air circulation")
+
+# Envelope heat flows
+st.subheader("🏗️ Building Envelope")
+env_col1, env_col2, env_col3 = st.columns(3)
+
+with env_col1:
+    walls_sign = "+" if results['Q_walls_kw'] >= 0 else ""
+    st.metric("🧱 Exterior Walls", f"{walls_sign}{results['Q_walls_kw']:.1f} kW",
+             help="Heat through two exterior walls. Positive = heat entering room from outdoors. "
+                  f"Outdoor temp: {results['T_outdoor']:.1f}°C ({results['T_outdoor']*9/5+32:.1f}°F)")
+
+with env_col2:
+    st.metric("⬇️ Floor to Ground", f"-{results['Q_floor_kw']:.1f} kW",
+             help="Passive cooling — heat leaves room into 17°C ground slab. Always removes heat when room > 17°C.")
+
+with env_col3:
+    st.metric("🌡️ Outdoor Temp", f"{results['T_outdoor']:.1f}°C ({results['T_outdoor']*9/5+32:.1f}°F)",
+             help=f"Sinusoidal profile for Atlanta July day at hour {time_of_day:.1f}. "
+                  "Peak ~32°C at 3PM, low ~21°C at 5AM.")
 
 # Waste Heat Recovery Section
 
@@ -881,9 +942,18 @@ with st.expander("🔧 Advanced Details & Physics", expanded=False):
         st.write(f"- Air changes: {results['ach']:.1f} per hour")
 
     with col2:
+        st.write("**Building Envelope**")
+        st.write(f"- Outdoor temp: {results['T_outdoor']:.1f}°C ({results['T_outdoor']*9/5+32:.1f}°F)")
+        st.write(f"- Wall heat gain: {results['Q_walls_kw']:+.2f} kW")
+        st.write(f"- Floor heat loss: -{results['Q_floor_kw']:.2f} kW")
+        st.write(f"- Net envelope: {(results['Q_walls_kw'] - results['Q_floor_kw']):+.2f} kW")
+        st.write(f"- Thermal capacitance: {results['thermal_capacitance_MJK']:.2f} MJ/K")
+
+        st.write("")
         st.write("**Physics Check**")
-        heat_in = results['Q_total_kw']
-        heat_out = results['Q_dclc_kw'] + results['Q_rdhx_kw'] + results['Q_hx_removed_kw'] + results['Q_remaining_kw']
+        heat_in = results['Q_total_kw'] + max(results['Q_walls_kw'], 0)
+        heat_out = (results['Q_dclc_kw'] + results['Q_rdhx_kw'] + results['Q_hx_removed_kw']
+                    + results['Q_remaining_kw'] + results['Q_floor_kw'] - min(results['Q_walls_kw'], 0))
         st.write(f"- Heat in: {heat_in:.1f} kW")
         st.write(f"- Heat out: {heat_out:.1f} kW")
         st.write(f"- Balance: ✓ Conserved")
