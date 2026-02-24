@@ -8,9 +8,11 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+import time
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Rectangle, Patch
+import streamlit.components.v1 as components
 
 """
 ATL01 PACE ROOM - INTERACTIVE THERMAL MODEL
@@ -58,6 +60,18 @@ racks_per_row = st.sidebar.slider("Racks per Row", 5, 30, 20, 1,
 # Initialize session state for scheduled jobs
 if 'scheduled_jobs' not in st.session_state:
     st.session_state.scheduled_jobs = []
+if 'sim_data' not in st.session_state:
+    st.session_state.sim_data = None
+if 'sim_frame' not in st.session_state:
+    st.session_state.sim_frame = 0
+if 'sim_fingerprint' not in st.session_state:
+    st.session_state.sim_fingerprint = None
+if 'sim_stale' not in st.session_state:
+    st.session_state.sim_stale = False
+if 'sim_playing' not in st.session_state:
+    st.session_state.sim_playing = False
+if 'scroll_to_viz' not in st.session_state:
+    st.session_state.scroll_to_viz = False
 
 st.sidebar.subheader("❄️ Liquid Cooling")
 st.sidebar.caption("Captures heat before it reaches room air")
@@ -97,6 +111,23 @@ outdoor_temp_profile = {
 # Default to peak hour (3PM) for steady-state calculation
 time_of_day = 15.0
 
+# Simulation state invalidation — clear sim_data if any input has changed
+_current_fingerprint = (
+    room_length, room_width, room_height,
+    num_rows, racks_per_row,
+    dclc_effectiveness, rdhx_effectiveness,
+    num_heat_exchangers, hx_capacity_kw,
+    num_air_handlers, cfm_per_handler,
+    inlet_temp_c,
+    tuple((j['start_time'], j['end_time'], j['power_kw'], j['num_racks'])
+          for j in sorted(st.session_state.scheduled_jobs, key=lambda j: j['id'])),
+)
+if st.session_state.sim_fingerprint is not None and _current_fingerprint != st.session_state.sim_fingerprint:
+    st.session_state.sim_data = None
+    st.session_state.sim_frame = 0
+    st.session_state.sim_fingerprint = None
+    st.session_state.sim_stale = True
+    st.session_state.sim_playing = False
 
 # ===== JOB SCHEDULING SECTION =====
 st.header("📅 Job Scheduler")
@@ -105,220 +136,7 @@ st.markdown("Schedule GPU jobs throughout the day to see thermal impact over tim
 # Job scheduler UI
 col1, col2 = st.columns([2, 1])
 
-with col1:
-    st.subheader("➕ Add New Job")
 
-    job_col1, job_col2, job_col3 = st.columns(3)
-
-    with job_col1:
-        job_start_time_input = st.time_input("Start Time",
-                                             value=None,
-                                             step=900,  # 15 minute increments
-                                             help="When the job starts (24-hour format)")
-
-    with job_col2:
-        job_duration_hours = st.number_input("Duration (hours)", min_value=0.5, max_value=24.0, value=2.0, step=0.5,
-                                            help="How long the job runs")
-
-    with job_col3:
-        gpu_power_level = st.selectbox("GPU Power Level",
-                                       options=["Low (20 kW)", "Medium (40 kW)", "High (55 kW)"],
-                                       index=1,
-                                       help="Power consumption per rack during job")
-        # Extract power value
-        power_map = {"Low (20 kW)": 20.0, "Medium (40 kW)": 40.0, "High (55 kW)": 55.0}
-        job_power_kw = power_map[gpu_power_level]
-
-    total_available_racks = num_rows * racks_per_row
-    job_num_racks = st.number_input("Number of Racks",
-                                   min_value=1,
-                                   max_value=total_available_racks,
-                                   value=min(10, total_available_racks),
-                                   step=1,
-                                   help=f"Number of racks needed (max {total_available_racks} available)")
-
-    # Add job button
-    add_button_disabled = job_start_time_input is None
-    if st.button("➕ Add Job", type="primary", use_container_width=True, disabled=add_button_disabled):
-        job_start_hour = job_start_time_input.hour
-        job_start_min = job_start_time_input.minute
-        job_start_time = job_start_hour + job_start_min / 60.0
-        job_end_time = job_start_time + job_duration_hours
-
-        new_job = {
-            'id': len(st.session_state.scheduled_jobs),
-            'start_hour': job_start_hour,
-            'start_min': job_start_min,
-            'start_time': job_start_time,
-            'duration': job_duration_hours,
-            'end_time': job_end_time,
-            'power_kw': job_power_kw,
-            'num_racks': job_num_racks,
-            'power_level': gpu_power_level
-        }
-        st.session_state.scheduled_jobs.append(new_job)
-        st.rerun()
-
-with col2:
-    st.subheader("⚡ Current Status")
-    st.metric("Total Jobs", len(st.session_state.scheduled_jobs))
-    st.metric("Available Racks", f"{total_available_racks}")
-
-    # Play button (placeholder for now)
-    st.markdown("---")
-    play_button = st.button("▶️ Run Simulation", type="secondary", use_container_width=True, disabled=len(st.session_state.scheduled_jobs) == 0)
-    if play_button:
-        st.info("⏳ Simulation feature coming soon!")
-
-# Display scheduled jobs in calendar-style view
-if len(st.session_state.scheduled_jobs) > 0:
-    st.subheader("📋 Scheduled Jobs Timeline")
-
-    # Sort jobs by start time
-    sorted_jobs = sorted(st.session_state.scheduled_jobs, key=lambda x: x['start_time'])
-
-    # Build job blocks HTML
-    job_blocks_html = ""
-    for job_idx, job in enumerate(sorted_jobs):
-        start_pct = (job['start_time'] / 24) * 100
-        duration_pct = (job['duration'] / 24) * 100
-
-        # Offset jobs vertically if they overlap
-        top_position = 10 + (job_idx % 2) * 55  # Alternate between two rows
-
-        job_class = "job-low" if "Low" in job['power_level'] else "job-medium" if "Medium" in job['power_level'] else "job-high"
-        job_emoji = "🟢" if "Low" in job['power_level'] else "🟡" if "Medium" in job['power_level'] else "🔴"
-
-        job_blocks_html += f'<div class="job-block {job_class}" style="left: {start_pct}%; width: {duration_pct}%; top: {top_position}px;">{job_emoji} Job {job_idx + 1}</div>'
-
-    # Build hour labels HTML
-    hour_labels_html = ""
-    for hour in range(24):
-        hour_labels_html += f'<div class="timeline-hour">{hour:02d}</div>'
-
-    # Create complete calendar HTML
-    calendar_html = f"""
-    <style>
-        .calendar-container {{
-            background: linear-gradient(180deg, #2d3436 0%, #34495e 100%);
-            border-radius: 12px;
-            padding: 20px;
-            margin: 10px 0;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }}
-        .timeline-grid {{
-            position: relative;
-            height: 150px;
-            background: repeating-linear-gradient(
-                90deg,
-                rgba(255,255,255,0.05) 0px,
-                rgba(255,255,255,0.05) 1px,
-                transparent 1px,
-                transparent calc(100% / 24)
-            );
-            border: 2px solid rgba(255,255,255,0.2);
-            border-radius: 8px;
-            margin: 15px 0;
-        }}
-        .timeline-hours {{
-            display: flex;
-            justify-content: space-between;
-            color: #bdc3c7;
-            font-size: 11px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            padding: 0 5px;
-        }}
-        .timeline-hour {{
-            width: calc(100% / 24);
-            text-align: center;
-        }}
-        .job-block {{
-            position: absolute;
-            height: 50px;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 13px;
-            color: white;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-            border: 2px solid rgba(255,255,255,0.3);
-            transition: transform 0.2s;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
-        }}
-        .job-block:hover {{
-            transform: scale(1.03);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
-        }}
-        .job-low {{
-            background: linear-gradient(135deg, #00b894 0%, #00cec9 100%);
-        }}
-        .job-medium {{
-            background: linear-gradient(135deg, #fdcb6e 0%, #f39c12 100%);
-        }}
-        .job-high {{
-            background: linear-gradient(135deg, #ff7675 0%, #d63031 100%);
-        }}
-        .job-details {{
-            background: rgba(44, 62, 80, 0.95);
-            border-radius: 8px;
-            padding: 12px 15px;
-            margin: 10px 0;
-            border-left: 4px solid #3498db;
-            color: #ecf0f1;
-            font-size: 14px;
-        }}
-        .job-details strong {{
-            color: #3498db;
-        }}
-    </style>
-    <div class="calendar-container">
-        <div class="timeline-hours">
-            {hour_labels_html}
-        </div>
-        <div class="timeline-grid">
-            {job_blocks_html}
-        </div>
-    </div>
-    """
-
-    st.markdown(calendar_html, unsafe_allow_html=True)
-
-    # Job details list
-    st.markdown("### Job Details")
-    for job_idx, job in enumerate(sorted_jobs):
-        job_emoji = "🟢" if "Low" in job['power_level'] else "🟡" if "Medium" in job['power_level'] else "🔴"
-
-        col1, col2 = st.columns([5, 1])
-
-        with col1:
-            st.markdown(f"""
-            <div class="job-details">
-                <strong>{job_emoji} Job {job_idx + 1}:</strong>
-                {job['start_hour']:02d}:{job['start_min']:02d} → {int(job['end_time']):02d}:{int((job['end_time'] % 1) * 60):02d}
-                ({job['duration']:.1f}h) |
-                {job['power_level']} |
-                {job['num_racks']} racks |
-                {job['num_racks'] * job['power_kw']:.0f} kW total
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col2:
-            if st.button("🗑️ Remove", key=f"delete_{job_idx}", use_container_width=True):
-                st.session_state.scheduled_jobs.remove(job)
-                st.rerun()
-
-    # Clear all button
-    st.markdown("")
-    if st.button("🗑️ Clear All Jobs", type="secondary", use_container_width=False):
-        st.session_state.scheduled_jobs = []
-        st.rerun()
-else:
-    st.info("📅 No jobs scheduled yet. Add your first job above to get started!")
-
-st.divider()
 
 #Estimated calculations based on tour info and other similar data centers:
 # CODA Rack Density Model:
@@ -336,12 +154,16 @@ total_racks = num_rows * racks_per_row
 rack_power_kw = FULL_GPU_RACK_KW
 
 
+# Assumed baseline power per rack when no job is running (may need to update)
+IDLE_RACK_KW = 15.0
+
+
 def calculate_thermal_system(room_length, room_width, room_height,
                              num_rows, racks_per_row, rack_power_kw,
                              rdhx_effectiveness, dclc_effectiveness, num_air_handlers,
                              num_heat_exchangers, hx_capacity_kw,
                              inlet_temp_c, waste_threshold_c, cfm_per_handler,
-                             time_of_day):
+                             time_of_day, rack_powers_kw=None):
     """Calculate thermal system with physically accurate equations
 
     Heat Flow Stages:
@@ -386,9 +208,20 @@ def calculate_thermal_system(room_length, room_width, room_height,
 
     total_racks = len(RACKS)
 
+
+
     # === HEAT GENERATION ===
-    Q_TOTAL_W = total_racks * rack_power_kw * 1000  # Total IT load in Watts
     CODA_TOTAL_CAPACITY_KW = 7100  # 7.1 MW
+    Q_TOTAL_W = total_racks * rack_power_kw * 1000  # Total IT load in Watts
+
+    if rack_powers_kw is not None:
+        # Dynamic mode: apply per-rack power from the simulation schedule.
+        # Any rack index beyond the array length stays at IDLE_RACK_KW.
+        p = np.asarray(rack_powers_kw, dtype=float).ravel()
+        for i, rack in enumerate(RACKS):
+            rack['power_kw'] = float(p[i]) if i < len(p) else rack['power_kw']
+        Q_TOTAL_W = sum(rack['power_kw'] for rack in RACKS) * 1000.0
+
 
     if Q_TOTAL_W / 1000 > CODA_TOTAL_CAPACITY_KW:
         st.warning("⚠️ IT load exceeds CODA 7.1 MW design capacity!")
@@ -594,6 +427,7 @@ def calculate_thermal_system(room_length, room_width, room_height,
         'air_handlers': AIR_HANDLERS,
         'hx_positions': HX_POSITIONS,
         'total_racks': total_racks,
+        'active_racks': sum(1 for rack in RACKS if rack['power_kw'] > IDLE_RACK_KW + 1e-6),
         'Q_total_kw': Q_TOTAL_W / 1000,
         'Q_dclc_kw': Q_DCLC_W / 1000,
         'Q_after_dclc_kw': Q_AFTER_DCLC_W / 1000,
@@ -631,8 +465,361 @@ def calculate_thermal_system(room_length, room_width, room_height,
         'total_facility_power_kw': total_facility_power_w / 1000,
         'cooling_overhead_fraction': total_overhead_fraction,
         'liquid_cooling_fraction': liquid_cooling_fraction,
+        'time_of_day': time_of_day
     }
 
+
+def build_sim_data(scheduled_jobs,
+                   room_length, room_width, room_height,
+                   num_rows, racks_per_row,
+                   dclc_effectiveness, rdhx_effectiveness,
+                   num_heat_exchangers, hx_capacity_kw,
+                   num_air_handlers, cfm_per_handler,
+                   inlet_temp_c,
+                   dt_sim_s=60,
+                   dt_vis_s=900, # new frame every 15 minutes
+                   horizon_hours=24):
+
+    total_racks = int(num_rows * racks_per_row)
+    room_volume = room_length * room_width * room_height
+    n_steps = int(horizon_hours * 3600 / dt_sim_s) + 1
+    times_h = np.arange(n_steps, dtype=np.float64) * dt_sim_s / 3600.0
+
+    # ── Per-timestep rack power assignment ───────────────────────────────────
+    # Same logic as the static model's rack layout, but now per-timestep.
+    # Each rack starts at IDLE_RACK_KW. Active jobs overwrite racks sequentially.
+
+    rack_powers_kw = np.zeros((n_steps, total_racks), dtype=np.float32)
+    Q_total_kw     = np.zeros(n_steps, dtype=np.float32)
+    T_outdoor_arr  = np.zeros(n_steps, dtype=np.float64)
+
+    jobs_sorted = sorted(scheduled_jobs,
+                         key=lambda j: (j.get('start_time', 0.0), j.get('id', 0)))
+
+    for k, t_h in enumerate(times_h):
+
+        # Outdoor temperature at this timestep — same formula as static model
+        T_outdoor_arr[k] = 26.5 + 5.5 * np.sin(2.0 * np.pi * (t_h - 9.0) / 24.0)
+
+        # Build per-rack power vector for this timestep
+        p = np.full(total_racks, IDLE_RACK_KW, dtype=np.float32)
+        taken = 0
+        for j in jobs_sorted:
+            if j.get('start_time', 0.0) <= t_h < j.get('end_time', -1.0) and t_h < 24.0:
+                if taken >= total_racks:
+                    break
+                n_racks = int(min(j.get('num_racks', 0), total_racks - taken))
+                if n_racks > 0:
+                    p[taken:taken + n_racks] = float(j.get('power_kw', 0.0))
+                    taken += n_racks
+
+        rack_powers_kw[k, :] = p
+        Q_total_kw[k] = float(np.sum(p))
+
+    # ── Thermal mass ──────────────────────────────────────────────────────────
+    # From static model: THERMAL_CAPACITANCE_MJK = RHO * 4096 * CP / 1e6
+    # Here we use the actual room volume instead of the hardcoded 4096.
+    C_air = RHO * room_volume * CP   # J/K
+
+    # ── Time integration ──────────────────────────────────────────────────────
+    # Static model solves: T_room * (m_Cp + UA_WALLS + UA_FLOOR) = ...
+    # That formula is the steady-state target T_ss.
+    # Here we integrate toward T_ss each timestep using the room's thermal mass.
+
+    UA_WALLS = 0.19 * 347
+    UA_FLOOR = 0.50 * 640
+    T_GROUND = 17.0
+
+    T_room_arr = np.zeros(n_steps, dtype=np.float64)
+    T_room_arr[0] = float(inlet_temp_c)
+
+    T_ss_arr = np.zeros(n_steps, dtype=np.float64)
+    for k in range(n_steps - 1):
+        Q_total_w = float(Q_total_kw[k]) * 1000.0
+        T_out_c   = float(T_outdoor_arr[k])
+
+        # --- Cooling stages: identical to static model ---
+        Q_dclc_w       = Q_total_w * dclc_effectiveness
+        Q_after_dclc_w = Q_total_w - Q_dclc_w
+        Q_rdhx_w       = Q_after_dclc_w * rdhx_effectiveness
+        Q_to_air_w     = Q_after_dclc_w * (1.0 - rdhx_effectiveness)
+        Q_hx_cap_w     = num_heat_exchangers * hx_capacity_kw * 1000.0
+        Q_hx_w         = min(Q_to_air_w, Q_hx_cap_w)
+        Q_remaining_w  = Q_to_air_w - Q_hx_w
+
+        # --- Airflow: identical to static model ---
+        power_density  = Q_total_w / room_volume if room_volume > 0 else 0.0
+        if num_air_handlers > 0:
+            total_cfm  = num_air_handlers * cfm_per_handler
+            vol_m3s    = total_cfm / 2119.0
+            m_dot      = vol_m3s * RHO
+        else:
+            ach        = max(5.0, min(20.0, 5.0 + power_density / 1000.0))
+            vol_m3s    = (room_volume * ach) / 3600.0
+            m_dot      = vol_m3s * RHO
+
+        # --- Steady-state target: identical to static model ---
+        m_Cp  = m_dot * CP
+        T_ss  = (inlet_temp_c * m_Cp + Q_remaining_w
+                 + UA_WALLS * T_out_c + UA_FLOOR * T_GROUND) / (m_Cp + UA_WALLS + UA_FLOOR)
+        T_ss_arr[k] = T_ss
+
+        # --- ODE integration toward T_ss ---
+        # k_eff is the denominator of the static model's T_room formula: m_Cp + UA_WALLS + UA_FLOOR
+        k_eff = m_Cp + UA_WALLS + UA_FLOOR
+        tau   = C_air / k_eff if k_eff > 0 else 1e9
+
+        decay          = np.exp(-dt_sim_s / tau)
+        T_next         = T_ss + (T_room_arr[k] - T_ss) * decay
+        T_room_arr[k+1]= float(np.clip(T_next, inlet_temp_c - 5.0, inlet_temp_c + 80.0))
+
+    # ── Frame selection for display ───────────────────────────────────────────
+    frame_stride  = max(1, int(dt_vis_s / dt_sim_s))
+    frame_indices = np.arange(0, n_steps, frame_stride, dtype=int)
+
+    def _fmt(h):
+        hh = int(h) % 24
+        mm = int(round((h - int(h)) * 60)) % 60
+        return f"{hh:02d}:{mm:02d}"
+
+    return {
+        'times_h':       times_h,
+        'frame_indices': frame_indices,
+        'frame_labels':  [_fmt(times_h[i]) for i in frame_indices],
+        'rack_powers_kw': rack_powers_kw,
+        'Q_total_kw':    Q_total_kw,
+        'T_room_c':      T_room_arr,
+        'T_outdoor_arr': T_outdoor_arr,
+        'total_racks':   total_racks,
+        'T_ss_arr': T_ss_arr,
+    }
+
+with col1:
+    st.subheader("➕ Add New Job")
+
+    job_col1, job_col2, job_col3 = st.columns(3)
+
+    with job_col1:
+        job_start_time_input = st.time_input("Start Time",
+                                             value=None,
+                                             step=900,  # 15 minute increments
+                                             help="When the job starts (24-hour format)")
+
+    with job_col2:
+        job_duration_hours = st.number_input("Duration (hours)", min_value=0.5, max_value=24.0, value=2.0, step=0.5,
+                                             help="How long the job runs")
+
+    with job_col3:
+        gpu_power_level = st.selectbox("GPU Power Level",
+                                       options=["Low (20 kW)", "Medium (40 kW)", "High (55 kW)"],
+                                       index=1,
+                                       help="Power consumption per rack during job")
+        # Extract power value
+        power_map = {"Low (20 kW)": 20.0, "Medium (40 kW)": 40.0, "High (55 kW)": 55.0}
+        job_power_kw = power_map[gpu_power_level]
+
+    total_available_racks = num_rows * racks_per_row
+    job_num_racks = st.number_input("Number of Racks",
+                                    min_value=1,
+                                    max_value=total_available_racks,
+                                    value=min(10, total_available_racks),
+                                    step=1,
+                                    help=f"Number of racks needed (max {total_available_racks} available)")
+
+    # Add job button
+    add_button_disabled = job_start_time_input is None
+    if st.button("➕ Add Job", type="primary", use_container_width=True, disabled=add_button_disabled):
+        job_start_hour = job_start_time_input.hour
+        job_start_min = job_start_time_input.minute
+        job_start_time = job_start_hour + job_start_min / 60.0
+        job_end_time = job_start_time + job_duration_hours
+
+        new_job = {
+            'id': len(st.session_state.scheduled_jobs),
+            'start_hour': job_start_hour,
+            'start_min': job_start_min,
+            'start_time': job_start_time,
+            'duration': job_duration_hours,
+            'end_time': job_end_time,
+            'power_kw': job_power_kw,
+            'num_racks': job_num_racks,
+            'power_level': gpu_power_level
+        }
+        st.session_state.scheduled_jobs.append(new_job)
+        st.rerun()
+
+with col2:
+    st.subheader("⚡ Current Status")
+    st.metric("Total Jobs", len(st.session_state.scheduled_jobs))
+    st.metric("Available Racks", f"{total_available_racks}")
+
+    # Play button (placeholder for now)
+    st.markdown("---")
+    play_button = st.button("▶️ Run Simulation", type="secondary", use_container_width=True, disabled=len(st.session_state.scheduled_jobs) == 0)
+    if play_button:
+        st.session_state.sim_data = build_sim_data(
+            st.session_state.scheduled_jobs,
+            room_length, room_width, room_height,
+            num_rows, racks_per_row,
+            dclc_effectiveness, rdhx_effectiveness,
+            num_heat_exchangers, hx_capacity_kw,
+            num_air_handlers, cfm_per_handler,
+            inlet_temp_c,
+        )
+        st.session_state.sim_frame = 0
+        st.session_state.sim_fingerprint = _current_fingerprint
+        st.session_state.sim_stale = False
+        st.session_state.scroll_to_viz = True
+
+# Display scheduled jobs in calendar-style view
+if len(st.session_state.scheduled_jobs) > 0:
+    st.subheader("📋 Scheduled Jobs Timeline")
+
+    # Sort jobs by start time
+    sorted_jobs = sorted(st.session_state.scheduled_jobs, key=lambda x: x['start_time'])
+
+    # Build job blocks HTML
+    job_blocks_html = ""
+    for job_idx, job in enumerate(sorted_jobs):
+        start_pct = (job['start_time'] / 24) * 100
+        duration_pct = (job['duration'] / 24) * 100
+
+        # Offset jobs vertically if they overlap
+        top_position = 10 + (job_idx % 2) * 55  # Alternate between two rows
+
+        job_class = "job-low" if "Low" in job['power_level'] else "job-medium" if "Medium" in job['power_level'] else "job-high"
+        job_emoji = "🟢" if "Low" in job['power_level'] else "🟡" if "Medium" in job['power_level'] else "🔴"
+
+        job_blocks_html += f'<div class="job-block {job_class}" style="left: {start_pct}%; width: {duration_pct}%; top: {top_position}px;">{job_emoji} Job {job_idx + 1}</div>'
+
+    # Build hour labels HTML
+    hour_labels_html = ""
+    for hour in range(24):
+        hour_labels_html += f'<div class="timeline-hour">{hour:02d}</div>'
+
+    # Create complete calendar HTML
+    calendar_html = f"""
+    <style>
+        .calendar-container {{
+            background: linear-gradient(180deg, #2d3436 0%, #34495e 100%);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 10px 0;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }}
+        .timeline-grid {{
+            position: relative;
+            height: 150px;
+            background: repeating-linear-gradient(
+                90deg,
+                rgba(255,255,255,0.05) 0px,
+                rgba(255,255,255,0.05) 1px,
+                transparent 1px,
+                transparent calc(100% / 24)
+            );
+            border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            margin: 15px 0;
+        }}
+        .timeline-hours {{
+            display: flex;
+            justify-content: space-between;
+            color: #bdc3c7;
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            padding: 0 5px;
+        }}
+        .timeline-hour {{
+            width: calc(100% / 24);
+            text-align: center;
+        }}
+        .job-block {{
+            position: absolute;
+            height: 50px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 13px;
+            color: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+            border: 2px solid rgba(255,255,255,0.3);
+            transition: transform 0.2s;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+        }}
+        .job-block:hover {{
+            transform: scale(1.03);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+        }}
+        .job-low {{
+            background: linear-gradient(135deg, #00b894 0%, #00cec9 100%);
+        }}
+        .job-medium {{
+            background: linear-gradient(135deg, #fdcb6e 0%, #f39c12 100%);
+        }}
+        .job-high {{
+            background: linear-gradient(135deg, #ff7675 0%, #d63031 100%);
+        }}
+        .job-details {{
+            background: rgba(44, 62, 80, 0.95);
+            border-radius: 8px;
+            padding: 12px 15px;
+            margin: 10px 0;
+            border-left: 4px solid #3498db;
+            color: #ecf0f1;
+            font-size: 14px;
+        }}
+        .job-details strong {{
+            color: #3498db;
+        }}
+    </style>
+    <div class="calendar-container">
+        <div class="timeline-hours">
+            {hour_labels_html}
+        </div>
+        <div class="timeline-grid">
+            {job_blocks_html}
+        </div>
+    </div>
+    """
+
+    st.markdown(calendar_html, unsafe_allow_html=True)
+
+    # Job details list
+    st.markdown("### Job Details")
+    for job_idx, job in enumerate(sorted_jobs):
+        job_emoji = "🟢" if "Low" in job['power_level'] else "🟡" if "Medium" in job['power_level'] else "🔴"
+
+        col1, col2 = st.columns([5, 1])
+
+        with col1:
+            st.markdown(f"""
+            <div class="job-details">
+                <strong>{job_emoji} Job {job_idx + 1}:</strong>
+                {job['start_hour']:02d}:{job['start_min']:02d} → {int(job['end_time']):02d}:{int((job['end_time'] % 1) * 60):02d}
+                ({job['duration']:.1f}h) |
+                {job['power_level']} |
+                {job['num_racks']} racks |
+                {job['num_racks'] * job['power_kw']:.0f} kW total
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col2:
+            if st.button("🗑️ Remove", key=f"delete_{job_idx}", use_container_width=True):
+                st.session_state.scheduled_jobs.remove(job)
+                st.rerun()
+
+    # Clear all button
+    st.markdown("")
+    if st.button("🗑️ Clear All Jobs", type="secondary", use_container_width=False):
+        st.session_state.scheduled_jobs = []
+        st.rerun()
+else:
+    st.info("📅 No jobs scheduled yet. Add your first job above to get started!")
+
+st.divider()
 
 def plot_thermal_field(results):
     """Create thermal visualization"""
@@ -655,21 +842,30 @@ def plot_thermal_field(results):
     contours = ax1.contour(results['X'], results['Y'], T_f,
                           levels=levels_f, colors='black', linewidths=1.2, alpha=0.5)
     ax1.clabel(contours, inline=True, fontsize=8, fmt='%.1f°F')
-    
-    # Plot racks
+
+    # Plot racks — active (power > idle) in dark red, idle in grey
     for rack in results['racks']:
+        is_active = rack['power_kw'] > IDLE_RACK_KW + 1e-6
         rect = Rectangle((rack['x'] - rack['width']/2, rack['y'] - rack['depth']/2),
-                       rack['width'], rack['depth'],
-                       facecolor='darkred', edgecolor='black',
-                       linewidth=0.3, alpha=0.85)
+                         rack['width'], rack['depth'],
+                         facecolor='darkred' if is_active else 'dimgray',
+                         edgecolor='black',
+                         linewidth=0.3,
+                         alpha=0.85 if is_active else 0.55)
         ax1.add_patch(rect)
-        
+
         # RDHX indicator (blue strip)
         rdhx = Rectangle((rack['x'] - rack['width']/2, rack['y'] + rack['depth']/2 - 0.05),
-                       rack['width'], 0.05,
-                       facecolor='royalblue', alpha=0.95)
+                         rack['width'], 0.05,
+                         facecolor='royalblue', alpha=0.95)
         ax1.add_patch(rdhx)
-    
+
+    legend_handles = [
+        Patch(facecolor='darkred', edgecolor='black', alpha=0.85, label='Active rack'),
+        Patch(facecolor='dimgray', edgecolor='black', alpha=0.55, label='Idle rack'),
+    ]
+    ax1.legend(handles=legend_handles, loc='upper right', fontsize=8, framealpha=0.9)
+
     # Plot air handlers
     for handler in results['air_handlers']:
         rect = Rectangle((handler['x'] - handler['width']/2, handler['y'] - handler['height']/2),
@@ -706,9 +902,17 @@ def plot_thermal_field(results):
     
     ax1.set_xlabel('Room Length (m)', fontsize=10)
     ax1.set_ylabel('Room Width (m)', fontsize=10)
-    ax1.set_title(f'Thermal Map: {results["total_racks"]} Racks @ {results["racks"][0]["power_kw"]:.0f}kW\n'
-                 f'Room Temp: {results["T_room"]*9/5+32:.1f}°F',
-                 fontsize=11, fontweight='bold')
+
+    _h = int(results["time_of_day"])
+    _m = int(round((results["time_of_day"] - _h) * 60))
+    ax1.set_title(
+        f'Thermal Map: {results["active_racks"]}/{results["total_racks"]} Active Racks'
+        f'  |  IT Load: {results["Q_total_kw"]:.0f} kW\n'
+        f'Room: {results["T_room"]*9/5+32:.1f}°F'
+        f'  |  Outdoor: {results["T_outdoor"]*9/5+32:.1f}°F'
+        f'  |  Time: {_h:02d}:{_m:02d}',
+        fontsize=11, fontweight='bold')
+
     ax1.set_xlim([0, results['room_length']])
     ax1.set_ylim([0, results['room_width']])
     ax1.grid(True, alpha=0.3, linewidth=0.5)
@@ -746,16 +950,80 @@ def plot_thermal_field(results):
 
 
 # Calculate thermal system
+sim = st.session_state.sim_data
+
+if sim is not None:
+    frame_idx = st.session_state.sim_frame
+    n_frames  = len(sim['frame_indices'])
+    step = sim['frame_indices'][frame_idx]
+    selected_rack_powers_kw = sim['rack_powers_kw'][step]
+    selected_time_of_day    = float(sim['times_h'][step])
+else:
+    # Static mode: no simulation run yet, use defaults
+    selected_rack_powers_kw = None
+    selected_time_of_day    = time_of_day
+
 results = calculate_thermal_system(
     room_length, room_width, room_height,
     num_rows, racks_per_row, rack_power_kw,
     rdhx_effectiveness, dclc_effectiveness, num_air_handlers,
     num_heat_exchangers, hx_capacity_kw,
     inlet_temp_c, waste_threshold_c, cfm_per_handler,
-    time_of_day
+    selected_time_of_day,
+    rack_powers_kw=selected_rack_powers_kw,
 )
 
+# Scroll anchor and auto-scroll on simulation run
+st.markdown('<div id="thermal-viz"></div>', unsafe_allow_html=True)
+st.header("Job Scheduler Simulation")
+if st.session_state.scroll_to_viz:
+    components.html(
+        """
+        <script>
+            window.parent.document.getElementById('thermal-viz').scrollIntoView({behavior: 'smooth'});
+        </script>
+        """,
+        height=0,
+    )
+    st.session_state.scroll_to_viz = False
+
+# Playback controls rendered here — between title and plots
+if sim is not None:
+    frame_idx = st.session_state.sim_frame
+    n_frames  = len(sim['frame_indices'])
+
+    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1, 1, 6, 1, 1])
+    with btn_col1:
+        if st.button("⏮ Prev", use_container_width=True, disabled=st.session_state.sim_playing):
+            st.session_state.sim_frame = max(0, frame_idx - 1)
+            st.rerun()
+    with btn_col2:
+        if st.session_state.sim_playing:
+            if st.button("⏸ Pause", use_container_width=True):
+                st.session_state.sim_playing = False
+                st.rerun()
+        else:
+            if st.button("▶️ Play", use_container_width=True):
+                st.session_state.sim_playing = True
+                st.rerun()
+    with btn_col4:
+        if st.button("Next ⏭", use_container_width=True, disabled=st.session_state.sim_playing):
+            st.session_state.sim_frame = min(n_frames - 1, frame_idx + 1)
+            st.rerun()
+
+    new_frame = st.select_slider(
+        "Simulation Time",
+        options=list(range(n_frames)),
+        value=st.session_state.sim_frame,
+        format_func=lambda i: sim['frame_labels'][i],
+        disabled=st.session_state.sim_playing,
+    )
+    if not st.session_state.sim_playing:
+        st.session_state.sim_frame = new_frame
+
 # Display plots
+if st.session_state.sim_stale:
+    st.warning("⚠️ Settings changed — simulation cleared. Press **▶️ Run Simulation** to update.")
 st.pyplot(plot_thermal_field(results))
 
 # Key Metrics
@@ -949,3 +1217,14 @@ with st.expander("🔧 Advanced Details & Physics", expanded=False):
 st.divider()
 st.caption("**ATL01 PACE Room Thermal Model** • Physics-based simulation using Q = ṁ × Cp × ΔT")
 st.caption("Hover over ⓘ icons for explanations • Adjust sidebar settings to explore different scenarios")
+
+# Auto-advance playback — runs after the full page has rendered
+if st.session_state.sim_playing and st.session_state.sim_data is not None:
+    n_frames = len(st.session_state.sim_data['frame_indices'])
+    if st.session_state.sim_frame < n_frames - 1:
+        time.sleep(0.45) # control how fast frames get rendered
+        st.session_state.sim_frame += 1
+        st.rerun()
+    else:
+        # Reached the end — stop automatically
+        st.session_state.sim_playing = False
