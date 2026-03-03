@@ -44,17 +44,13 @@ with st.expander("ℹ️ How to use this model", expanded=False):
 # Sidebar controls
 st.sidebar.header("⚙️ Configuration")
 
-st.sidebar.subheader("📐 Room Dimensions")
-st.sidebar.caption("Larger rooms have lower power density")
+st.sidebar.subheader("📐 Room & Racks")
 room_length = st.sidebar.slider("Room Length (m)", 10.0, 40.0, 27.1, 0.1,
                                 help="Length affects total room volume and power density")
 room_width = st.sidebar.slider("Room Width (m)", 5.0, 30.0, 23.6, 0.1,
                                help="Width affects total room volume and power density")
 room_height = st.sidebar.slider("Room Height (m)", 2.5, 8.0, 6.4, 0.1,
                                 help="Height affects air circulation and stratification")
-
-st.sidebar.subheader("🖥️ Server Racks")
-st.sidebar.caption("Configure rack layout")
 num_rows = st.sidebar.slider("Number of Rows", 1, 6, 3, 1,
                              help="Rows of server racks in the room")
 racks_per_row = st.sidebar.slider("Racks per Row", 5, 30, 20, 1,
@@ -76,45 +72,36 @@ if 'sim_playing' not in st.session_state:
 if 'scroll_to_viz' not in st.session_state:
     st.session_state.scroll_to_viz = False
 
-st.sidebar.subheader("❄️ Liquid Cooling")
-st.sidebar.caption("Captures heat before it reaches room air")
-# changed these options to be a little more realstic based on updated params
-dclc_effectiveness = st.sidebar.slider("DCLC (Direct Liquid Cooling)", 0.0, 0.60, 0.35, 0.05,
-                                       help="% of heat captured by cold plates at CPUs/GPUs. Higher = more efficient")
-rdhx_effectiveness = st.sidebar.slider("RDHX (Rear Door Heat Exchanger)", 0.0, 0.98, 0.92, 0.02,
-                                       help="% of rack exhaust heat captured by door-mounted exchangers")
-
-st.sidebar.subheader("♻️ Waste Heat Recovery")
-st.sidebar.caption("Captures heat for reuse (e.g., building heating)")
-num_heat_exchangers = st.sidebar.slider("Heat Exchangers", 0, 2, 0, 1,
-                                        help="Additional heat exchangers that capture waste heat for reuse")
+st.sidebar.subheader("❄️ Cooling System")
+dclc_effectiveness = st.sidebar.slider("DCLC Effectiveness", 0.0, 0.60, 0.35, 0.05,
+                                       help="% of heat captured by cold plates at CPUs/GPUs")
+rdhx_effectiveness = st.sidebar.slider("RDHX Effectiveness", 0.0, 0.98, 0.92, 0.02,
+                                       help="% of rack exhaust heat captured by rear door exchangers")
+num_heat_exchangers = st.sidebar.slider("Waste Heat Exchangers", 0, 2, 0, 1,
+                                        help="Heat exchangers that capture waste heat for reuse")
 hx_capacity_kw = st.sidebar.slider("HX Capacity (kW each)", 30.0, 150.0, 60.0, 10.0,
                                    help="Maximum heat each exchanger can capture")
+with st.sidebar.expander("CDU & Pump Details"):
+    cdu_flow_gpm = st.slider("Flow Rate per CDU (GPM)", 100.0, 200.0, 150.0, 5.0,
+                             help="Water flow rate per CDU")
+    num_cdus = st.slider("Number of CDUs", 1, 6, 3, 1,
+                         help="Cooling Distribution Units")
+    delta_p_kpa = st.slider("Loop Pressure Drop (kPa)", 100.0, 350.0, 200.0, 10.0,
+                            help="Pressure the pump must overcome")
+    pump_eta = st.slider("Pump Efficiency", 0.60, 0.85, 0.75, 0.05,
+                         help="Pump mechanical efficiency")
+    cop = st.slider("Chiller COP", 3.0, 6.0, 4.0, 0.5,
+                    help="Chiller Coefficient of Performance")
 
 st.sidebar.subheader("💨 Air Handling")
-st.sidebar.caption("Moves air to distribute cooling")
 num_air_handlers = st.sidebar.slider("Air Handlers", 0, 4, 2, 1,
-                                     help="Number of air handling units. More = better air circulation")
+                                     help="Number of air handling units")
 cfm_per_handler = st.sidebar.slider("Airflow per Handler (CFM)", 20000.0, 250000.0, 155000.0, 5000.0,
-                                    help="Cubic Feet per Minute. Higher = more cooling capacity")
-
-st.sidebar.subheader("🌡️ Temperature")
+                                    help="Cubic Feet per Minute per handler")
 inlet_temp_c = st.sidebar.slider("Inlet Temperature (°C)", 18.0, 28.0, 23.3, 0.5,
                                  help="Temperature of cooling air entering the room")
-waste_threshold_c = st.sidebar.slider("Hot Spot Alert Threshold (°C)", 25.0, 35.0, 30.0, 1.0,
+waste_threshold_c = st.sidebar.slider("Hot Spot Threshold (°C)", 25.0, 35.0, 30.0, 1.0,
                                       help="Temperature above which areas are flagged as too hot")
-
-st.sidebar.subheader("CDU & Pump Cooling Sizing")
-cdu_flow_gpm = st.sidebar.slider("Flow Rate per CDU (GPM)", 100.0, 200.0, 150.0, 5.0,
-                                 help="Water flow rate per CDU. ")
-num_cdus = st.sidebar.slider("Number of CDUs", 1, 6, 3, 1,
-                             help="Cooling Distribution Units.")
-delta_p_kpa = st.sidebar.slider("Loop Pressure Drop (kPa)", 100.0, 350.0, 200.0, 10.0,
-                                help="Pressure the pump must overcome.")
-pump_eta = st.sidebar.slider("Pump Efficiency", 0.60, 0.85, 0.75, 0.05,
-                             help="Pump mechanical efficiency.")
-cop = st.sidebar.slider("Chiller COP", 3.0, 6.0, 4.0, 0.5,
-                        help="Chiller Coefficient of Performance.")
 
 # 24-hour outdoor temperature profile for typical Atlanta July day
 # T_outdoor(t) = 26.5 + 5.5 × sin(2π(t - 9)/24)
@@ -706,8 +693,10 @@ with col1:
 
 with col2:
     st.subheader("⚡ Current Status")
-    st.metric("Total Jobs", len(st.session_state.scheduled_jobs))
-    st.metric("Available Racks", f"{total_available_racks}")
+    st.metric("Total Jobs", len(st.session_state.scheduled_jobs),
+              help="Number of GPU jobs currently scheduled")
+    st.metric("Available Racks", f"{total_available_racks}",
+              help="Total server racks in the room based on row and rack configuration")
 
     # Play button (placeholder for now)
     st.markdown("---")
@@ -1087,254 +1076,220 @@ if st.session_state.sim_stale:
     st.warning("⚠️ Settings changed — simulation cleared. Press **▶️ Run Simulation** to update.")
 st.pyplot(plot_thermal_field(results))
 
-# Key Metrics
-st.header("📊 Key Metrics")
+# ===== DASHBOARD =====
+st.header("Dashboard")
+dash1, dash2, dash3, dash4 = st.columns(4)
 
-col1, col2, col3 = st.columns(3)
+with dash1:
+    st.metric("Room Temperature", f"{results['T_room'] * 9 / 5 + 32:.1f}°F",
+              delta=f"{(results['T_room'] - results['T_inlet']) * 9 / 5:.1f}°F above inlet",
+              help="Average room temperature", border=True)
 
-with col1:
-    st.metric("🔥 Room Temperature", f"{results['T_room'] * 9 / 5 + 32:.1f}°F",
-              delta=f"{(results['T_room'] - results['T_inlet']) * 9 / 5:.1f}°F",
-              help="Average room temperature. Delta shows rise from inlet temperature.")
-    st.metric("💡 Total IT Load", f"{results['Q_total_kw']:.0f} kW",
-              help=f"{results['total_racks']} racks × {rack_power_kw:.0f} kW/rack")
-
-with col2:
+with dash2:
     pue_color = "normal" if results['pue'] < 1.3 else "inverse"
-    st.metric("⚡ PUE (Efficiency)", f"{results['pue']:.2f}",
+    st.metric("PUE", f"{results['pue']:.2f}",
               delta="Good" if results['pue'] < 1.3 else "Can improve",
               delta_color=pue_color,
-              help="Power Usage Effectiveness. Lower is better. <1.3 is excellent, 1.3-1.5 is good, >1.5 needs improvement")
-    st.metric("❄️ Liquid Cooling", f"{results['liquid_cooling_fraction'] * 100:.0f}%",
-              help="Percentage of heat captured by DCLC, RDHX, and heat exchangers")
+              help="Power Usage Effectiveness. Lower is better. <1.3 is excellent",
+              border=True)
 
-with col3:
+with dash3:
     if results['hot_spots'] > 0:
-        st.metric("⚠️ Hot Spots", f"{results['hot_spot_percent']:.1f}%",
+        st.metric("Hot Spots", f"{results['hot_spot_percent']:.1f}%",
                   delta="Warning", delta_color="inverse",
-                  help=f"Percentage of room above {waste_threshold_c}°C threshold")
+                  help=f"Room area above {waste_threshold_c}°C threshold",
+                  border=True)
     else:
-        st.metric("✅ Hot Spots", "0%",
+        st.metric("Hot Spots", "0%",
                   delta="All OK", delta_color="normal",
-                  help="No areas exceed temperature threshold")
-    st.metric("💨 Airflow", f"{results['cfm']:,.0f} CFM",
-              help=f"Total air circulation: {results['ach']:.1f} air changes per hour")
+                  help="No areas exceed temperature threshold",
+                  border=True)
 
-# Heat Flow Visualization
-st.header("🔄 Heat Flow Through System")
+with dash4:
+    st.metric("Total Cooling Power", f"{results['p_cooling_total_kw']:.0f} kW",
+              help="Pumps + Chiller + Fans combined electrical demand",
+              border=True)
 
-# Create a visual flow chart
-col1, col2, col3 = st.columns([1, 1, 1])
+st.divider()
 
-with col1:
-    st.metric("⚡ Heat Generated", f"{results['Q_total_kw']:.0f} kW",
-              help="Total heat from all server racks")
-    st.caption("↓")
-    st.metric("❄️ DCLC Captures", f"{results['Q_dclc_kw']:.0f} kW",
-              help=f"{dclc_effectiveness * 100:.0f}% captured by liquid cooling at CPUs/GPUs")
+# ===== HEAT FLOW & COOLING =====
+st.header("Heat Flow & Cooling")
 
-with col2:
-    st.metric("🌡️ Heat to Room", f"{results['Q_after_dclc_kw']:.0f} kW",
-              help="Heat that wasn't captured by DCLC")
-    st.caption("↓")
-    st.metric("🚪 RDHX Captures", f"{results['Q_rdhx_kw']:.0f} kW",
-              help=f"{rdhx_effectiveness * 100:.0f}% captured by rear door exchangers")
-
-with col3:
-    st.metric("♻️ HX Captures", f"{results['Q_hx_removed_kw']:.0f} kW",
-              help=f"Additional heat captured by {num_heat_exchangers} waste heat recovery units")
-    st.caption("↓")
-    st.metric("💨 To Air Handlers", f"{results['Q_remaining_kw']:.0f} kW",
-              help="Final heat managed by air circulation")
-
-# Envelope heat flows
-st.subheader("🏗️ Building Envelope")
-env_col1, env_col2, env_col3 = st.columns(3)
-
-with env_col1:
-    walls_sign = "+" if results['Q_walls_kw'] >= 0 else ""
-    st.metric("🧱 Exterior Walls", f"{walls_sign}{results['Q_walls_kw']:.1f} kW",
-              help="Heat through two exterior walls. Positive = heat entering room from outdoors. "
-                   f"Outdoor temp: {results['T_outdoor']:.1f}°C ({results['T_outdoor'] * 9 / 5 + 32:.1f}°F)")
-
-with env_col2:
-    st.metric("⬇️ Floor to Ground", f"-{results['Q_floor_kw']:.1f} kW",
-              help="Passive cooling — heat leaves room into 17°C ground slab. Always removes heat when room > 17°C.")
-
-with env_col3:
-    st.metric("🌡️ Outdoor Temp", f"{results['T_outdoor']:.1f}°C ({results['T_outdoor'] * 9 / 5 + 32:.1f}°F)",
-              help=f"Sinusoidal profile for Atlanta July day at hour {time_of_day:.1f}. "
-                   "Peak ~32°C at 3PM, low ~21°C at 5AM.")
-
-# Waste Heat Recovery Section
-
-# Realistic Annual Utilization based on new params:
-ANNUAL_LOAD_FACTOR = 0.8  # 80% utilization typical for HPC environments
+ANNUAL_LOAD_FACTOR = 0.8
 annual_mwh = results['Q_liquid_cooling_kw'] * 8760 * ANNUAL_LOAD_FACTOR / 1000
 
-if num_heat_exchangers > 0:
-    st.success(f"""
-    ♻️ **Waste Heat Recovery Active:** {annual_mwh:.0f} kW available for reuse
+tab_hf, tab_env, tab_ci = st.tabs(["Heat Flow", "Building Envelope", "Cooling Infrastructure"])
 
-    This heat can be used for:
-    - Building heating (e.g., CODA building)
-    - Hot water generation
-    - District heating systems
+with tab_hf:
+    hf1, hf2, hf3, hf4, hf5 = st.columns(5)
+    with hf1:
+        st.metric("IT Load", f"{results['Q_total_kw']:.0f} kW",
+                  help=f"{results['total_racks']} racks", border=True)
+    with hf2:
+        st.metric("DCLC", f"-{results['Q_dclc_kw']:.0f} kW",
+                  help=f"{dclc_effectiveness * 100:.0f}% captured at CPUs/GPUs", border=True)
+    with hf3:
+        st.metric("RDHX", f"-{results['Q_rdhx_kw']:.0f} kW",
+                  help=f"{rdhx_effectiveness * 100:.0f}% of remaining captured at rear doors",
+                  border=True)
+    with hf4:
+        st.metric("Waste HX", f"-{results['Q_hx_removed_kw']:.0f} kW",
+                  help=f"{num_heat_exchangers} heat exchangers", border=True)
+    with hf5:
+        st.metric("To Room Air", f"{results['Q_remaining_kw']:.0f} kW",
+                  help="Remaining heat handled by air circulation", border=True)
 
-    **Annual Energy Savings:** ~{annual_mwh:.0f} MWh/year
-    """)
-else:
-    st.info(f"""
-    💡 **Add Heat Exchangers for Waste Heat Recovery**
-
-    Currently {results['Q_liquid_cooling_kw']:.0f} kW of heat is being removed but not reused.
-    Add heat exchangers in the sidebar to capture this energy for building heating.
-
-    **Potential savings:** ~{annual_mwh:.0f} MWh/year
-    """)
-
-# Recommendations
-st.header("💡 System Status & Recommendations")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    if results['hot_spots'] > 0:
-        st.error(f"""
-        **⚠️ Temperature Alert**
-
-        {results['hot_spot_percent']:.1f}% of room exceeds {results['waste_threshold'] * 9 / 5 + 32:.0f}°F
-
-        **Try these improvements:**
-        """)
-        if num_air_handlers < 4:
-            st.write(f"• Increase air handlers from {num_air_handlers} to {num_air_handlers + 1}")
-        if rdhx_effectiveness < 0.95:
-            st.write(f"• Improve RDHX effectiveness (currently {rdhx_effectiveness * 100:.0f}%)")
-        if num_heat_exchangers < 2:
-            st.write(f"• Add heat exchangers for additional cooling")
-        if room_height < 4.0:
-            st.write(f"• Consider increasing room height for better air circulation")
+    if num_heat_exchangers > 0:
+        st.success(
+            f"**Waste Heat Recovery Active** — {results['Q_hx_removed_kw']:.0f} kW captured | "
+            f"~{annual_mwh:.0f} MWh/year potential savings"
+        )
     else:
-        st.success(f"""
-        **✅ System Operating Well**
+        st.info(
+            f"{results['Q_liquid_cooling_kw']:.0f} kW of heat available for recovery — "
+            f"add heat exchangers in the sidebar (~{annual_mwh:.0f} MWh/year potential)"
+        )
 
-        - Maximum temperature: {results['T_max'] * 9 / 5 + 32:.1f}°F
-        - All zones within safe limits
-        - PUE: {results['pue']:.2f} {'(Excellent)' if results['pue'] < 1.3 else '(Good)' if results['pue'] < 1.5 else '(Can improve)'}
-        """)
+with tab_env:
+    env1, env2, env3 = st.columns(3)
+    walls_sign = "+" if results['Q_walls_kw'] >= 0 else ""
+    with env1:
+        st.metric("Exterior Walls", f"{walls_sign}{results['Q_walls_kw']:.1f} kW",
+                  help="Heat through two exterior walls. Positive = heat entering from outdoors.",
+                  border=True)
+    with env2:
+        st.metric("Floor to Ground", f"-{results['Q_floor_kw']:.1f} kW",
+                  help="Passive cooling into 17°C ground slab. Always removes heat when room > 17°C.",
+                  border=True)
+    with env3:
+        st.metric("Outdoor Temp",
+                  f"{results['T_outdoor']:.1f}°C ({results['T_outdoor'] * 9 / 5 + 32:.1f}°F)",
+                  help="Sinusoidal profile for Atlanta July day. Peak ~32°C at 3PM, low ~21°C at 5AM.",
+                  border=True)
+    env_net = results['Q_walls_kw'] - results['Q_floor_kw']
+    st.caption(f"Net envelope effect: {env_net:+.1f} kW")
 
-with col2:
-    st.info(f"""
-    **📈 Quick Stats**
+with tab_ci:
+    ci1, ci2 = st.columns(2)
+    with ci1:
+        st.metric("CDU Return Temp", f"{results['t_return_c']:.1f}°C",
+                  delta=f"{results['t_return_c'] - 40.0:+.1f}°C vs 40°C target",
+                  delta_color="normal" if results['heat_recovery_viable'] else "inverse",
+                  help="Must reach 40°C for waste heat recovery",
+                  border=True)
+        if results['heat_recovery_viable']:
+            st.success("Hot enough for waste heat recovery (>= 40°C)")
+        else:
+            st.warning("Below 40°C — increase load or reduce flow rate")
 
-    - **Room:** {results['room_volume']:.0f} m³ ({room_length:.0f}m × {room_width:.0f}m × {room_height:.1f}m)
-    - **Power Density:** {results['power_density_w_m3']:.0f} W/m³
-    - **Temperature Rise:** {results['delta_t']:.1f}°C
-    - **Cooling Efficiency:** {results['liquid_cooling_fraction'] * 100:.0f}% liquid
-    """)
+    with ci2:
+        with st.container(border=True):
+            ci2a, ci2b, ci2c = st.columns(3)
+            with ci2a:
+                st.metric("Pump", f"{results['p_pump_kw']:.1f} kW", border=True,
+                          help="Electrical power to circulate coolant through the liquid cooling loop")
+            with ci2b:
+                st.metric("Chiller", f"{results['p_mech_kw']:.0f} kW", border=True,
+                          help="Mechanical cooling power to reject heat that isn't recovered")
+            with ci2c:
+                st.metric("Fans", f"{results['fan_power_kw']:.0f} kW", border=True,
+                          help="Air handler fan power for room air circulation")
+            st.caption(
+                f"Total: {results['p_cooling_total_kw']:.0f} kW | "
+                f"Flow: {results['m_dot_liquid_gpm']:.0f} GPM | "
+                f"Heat to reject: {results['q_rejected_kw']:.0f} kW"
+            )
 
-# Advanced details collapsible
-with st.expander("🔧 Advanced Details & Physics", expanded=False):
-    col1, col2 = st.columns(2)
+st.divider()
 
-    with col1:
+# ===== SYSTEM STATUS =====
+st.header("System Status")
+
+if results['hot_spots'] > 0:
+    st.error(
+        f"**Temperature Alert** — {results['hot_spot_percent']:.1f}% of room "
+        f"exceeds {results['waste_threshold'] * 9 / 5 + 32:.0f}°F"
+    )
+    recommendations = []
+    if num_air_handlers < 4:
+        recommendations.append(f"Increase air handlers from {num_air_handlers} to {num_air_handlers + 1}")
+    if rdhx_effectiveness < 0.95:
+        recommendations.append(f"Improve RDHX effectiveness (currently {rdhx_effectiveness * 100:.0f}%)")
+    if num_heat_exchangers < 2:
+        recommendations.append("Add heat exchangers for additional cooling")
+    if room_height < 4.0:
+        recommendations.append("Increase room height for better air circulation")
+    for rec in recommendations:
+        st.write(f"- {rec}")
+else:
+    pue_label = '(Excellent)' if results['pue'] < 1.3 else '(Good)' if results['pue'] < 1.5 else '(Can improve)'
+    st.success(
+        f"**System Operating Well** — Max temp: {results['T_max'] * 9 / 5 + 32:.1f}°F | "
+        f"PUE: {results['pue']:.2f} {pue_label}"
+    )
+
+# ===== ADVANCED DETAILS & PHYSICS =====
+with st.expander("Advanced Details & Physics", expanded=False):
+    adv1, adv2, adv3 = st.columns(3)
+
+    with adv1:
         st.write("**Temperature Profile**")
         st.write(f"- Inlet: {results['T_inlet'] * 9 / 5 + 32:.1f}°F")
         st.write(f"- Room average: {results['T_avg'] * 9 / 5 + 32:.1f}°F")
         st.write(f"- Maximum: {results['T_max'] * 9 / 5 + 32:.1f}°F")
         st.write(f"- Rack exhaust: {results['T_rack_exhaust'] * 9 / 5 + 32:.1f}°F")
+        st.write(f"- After RDHX: {results['T_rack_exhaust_after_rdhx'] * 9 / 5 + 32:.1f}°F")
 
         st.write("")
         st.write("**Airflow**")
         st.write(f"- Total: {results['cfm']:,.0f} CFM")
         st.write(f"- Per handler: {results['cfm_per_handler']:,.0f} CFM")
-        st.write(f"- Air changes: {results['ach']:.1f} per hour")
+        st.write(f"- Air changes: {results['ach']:.1f}/hr")
 
-    with col2:
+    with adv2:
         st.write("**Building Envelope**")
-        st.write(f"- Outdoor temp: {results['T_outdoor']:.1f}°C ({results['T_outdoor'] * 9 / 5 + 32:.1f}°F)")
+        st.write(f"- Outdoor: {results['T_outdoor']:.1f}°C ({results['T_outdoor'] * 9 / 5 + 32:.1f}°F)")
         st.write(f"- Wall heat gain: {results['Q_walls_kw']:+.2f} kW")
         st.write(f"- Floor heat loss: -{results['Q_floor_kw']:.2f} kW")
         st.write(f"- Net envelope: {(results['Q_walls_kw'] - results['Q_floor_kw']):+.2f} kW")
         st.write(f"- Thermal capacitance: {results['thermal_capacitance_MJK']:.2f} MJ/K")
 
         st.write("")
-        st.write("**Physics Check**")
+        st.write("**Energy Balance**")
         heat_in = results['Q_total_kw'] + max(results['Q_walls_kw'], 0)
         heat_out = (results['Q_dclc_kw'] + results['Q_rdhx_kw'] + results['Q_hx_removed_kw']
                     + results['Q_remaining_kw'] + results['Q_floor_kw'] - min(results['Q_walls_kw'], 0))
         st.write(f"- Heat in: {heat_in:.1f} kW")
         st.write(f"- Heat out: {heat_out:.1f} kW")
-        st.write(f"- Balance: ✓ Conserved")
-
-        st.write("")
-        st.write("**Energy Efficiency**")
         st.write(f"- IT load: {results['Q_total_kw']:.0f} kW")
         st.write(f"- Total facility: {results['total_facility_power_kw']:.0f} kW")
         st.write(f"- Overhead: {results['cooling_overhead_fraction'] * 100:.1f}%")
 
-# COOLING POWER REQUIREMENTS
-st.divider()
-st.header("Facility Cooling Power")
-st.caption(
-    "Supply temp 22.8°C and recovery target 40°C are known design constants. "
-    "Flow rate, pressure drop, pump efficiency, and COP are ATL1 unknowns, adjust sliders to explore."
-)
+    with adv3:
+        st.write("**Cooling Infrastructure**")
+        st.write(f"- CDU supply: {results['t_supply_known']:.1f}°C")
+        st.write(f"- CDU return: {results['t_return_c']:.1f}°C")
+        st.write(f"- Water ΔT: {results['delta_t_water']:.1f}°C")
+        st.write(f"- Flow: {results['m_dot_liquid_gpm']:.0f} GPM ({results['m_dot_liquid_kgs']:.1f} kg/s)")
+        st.write(f"- Liquid heat: {results['Q_liquid_cooling_kw']:.0f} kW")
+        st.write(f"- Pump: {results['p_pump_kw']:.1f} kW")
+        st.write(f"- Chiller: {results['p_mech_kw']:.0f} kW")
 
-r = results
-cp1, cp2, cp3, cp4 = st.columns(4)
-
-with cp1:
-    st.subheader("🌡️ CDU Return Temp")
-    st.caption("T_return = T_supply + Q / (ṁ × cₚ)")
-    st.metric(
-        "Calculated Return Temp",
-        f"{r['t_return_c']:.1f}°C",
-        delta=f"{r['t_return_c'] - 40.0:+.1f}°C vs 40°C target",
-        delta_color="normal" if r['heat_recovery_viable'] else "inverse",
-        help="Calculated from flow rate and heat load. Must reach 40°C for waste heat recovery."
-    )
-    if r['heat_recovery_viable']:
-        st.success("✅ Hot enough for waste heat recovery (≥ 40°C)")
-    else:
-        st.warning("⚠️ Below 40°C — increase load or reduce flow rate")
-    st.caption(f"22.8°C supply + {r['delta_t_water']:.1f}°C rise = {r['t_return_c']:.1f}°C")
-    st.caption(f"Flow: {cdu_flow_gpm:.0f} GPM × {num_cdus} CDUs = {r['m_dot_liquid_gpm']:.0f} GPM total")
-
-with cp2:
-    st.subheader("💧 Coolant Flow Rate")
-    st.caption("ṁ = (GPM × CDUs) / 15.85")
-    st.metric("Total Flow", f"{r['m_dot_liquid_gpm']:.0f} GPM",
-              help="ATL1 unknown — est. 100–200 GPM per CDU")
-    st.metric("Total Flow", f"{r['m_dot_liquid_kgs']:.1f} kg/s")
-    st.caption(f"Liquid heat load: {r['Q_liquid_cooling_kw']:.0f} kW")
-
-with cp3:
-    st.subheader("⚡ Pump Power")
-    st.caption("P_pump = (ΔP · Q_vol) / η")
-    st.metric("Pump Power", f"{r['p_pump_kw']:.1f} kW",
-              help="ATL1 unknown — est. 200–300 kW total")
-    st.caption(f"ΔP: {delta_p_kpa:.0f} kPa | η: {pump_eta:.0%}")
-
-with cp4:
-    st.subheader("❄️ Chiller Power")
-    st.caption("P_mech = Q_rejected / COP")
-    st.metric("Chiller Power", f"{r['p_mech_kw']:.0f} kW",
-              help="ATL1 unknown — cooling tower est. 8–9 MW capacity")
-    st.metric("Heat to Reject", f"{r['q_rejected_kw']:.0f} kW",
-              help="Liquid heat not recovered by waste-HX — goes to cooling tower")
-    st.caption(f"COP: {cop:.1f}")
-
-st.info(
-    f"🔌 **Total cooling electrical demand: {r['p_cooling_total_kw']:.0f} kW** — "
-    f"Pumps {r['p_pump_kw']:.0f} kW + Chiller {r['p_mech_kw']:.0f} kW + Fans {r['fan_power_kw']:.0f} kW"
-)
+        st.write("")
+        st.write("**Physics Equations**")
+        st.code(
+            "Q = ṁ × Cₚ × ΔT\n"
+            "T_return = T_supply + Q / (ṁ × cₚ)\n"
+            "P_pump = (ΔP × Q_vol) / η\n"
+            "P_mech = Q_rejected / COP\n"
+            "T_room = (T_in·ṁCₚ + Q_IT + UA_w·T_out\n"
+            "          + UA_f·T_gnd) / (ṁCₚ + UA_w + UA_f)",
+            language=None,
+        )
 
 # Footer
 st.divider()
-st.caption("**ATL01 PACE Room Thermal Model** • Physics-based simulation using Q = ṁ × Cp × ΔT")
-st.caption("Hover over ⓘ icons for explanations • Adjust sidebar settings to explore different scenarios")
+st.caption("**ATL01 PACE Room Thermal Model** — Hover over info icons for explanations")
 
 # Auto-advance playback — runs after the full page has rendered
 if st.session_state.sim_playing and st.session_state.sim_data is not None:
