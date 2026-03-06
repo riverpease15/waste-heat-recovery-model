@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <link rel="preconnect" href="https://fonts.googleapis.com"/>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet"/>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        html, body {
+          background: transparent;
+          font-family: var(--font-ui);
+          padding: 4px 2px 8px 2px;
+          overflow: hidden;
+        }
+
+        .label {
+          font-size: var(--label-size);
+          font-weight: 500;
+          color: var(--label-color);
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          margin-bottom: 8px;
+          user-select: none;
+        }
+
+        /* ── Shared input wrapper ─────────────────────────────────────────────── */
+        .input-wrapper {
+          display: inline-flex;
+          align-items: center;
+          background: var(--surface);
+          border: var(--border-width) solid var(--border);
+          border-radius: var(--border-radius);
+          padding: var(--padding-v) var(--padding-h);
+          transition: border-color 0.2s, box-shadow 0.2s;
+          width: 100%;
+          height: var(--input-height);   /* explicit shared height — same for all three */
+        }
+
+        .input-wrapper.focused {
+          border-color: var(--border-focus);
+          box-shadow: 0 0 0 3px var(--glow);
+        }
+
+        /* ── Digit inputs (clock & duration) ─────────────────────────────────── */
+        .digit-group { display: flex; align-items: center; gap: 1px; }
+
+        .digit {
+          font-family: var(--font-clock);
+          font-size: var(--digit-size);
+          line-height: 1;
+          color: var(--digit);
+          width: 22px;
+          text-align: center;
+          transition: color 0.12s;
+          user-select: none;
+        }
+
+        .digit.dim { color: var(--digit-dim); }
+
+        /* placeholder shown before first interaction */
+        .digit-placeholder {
+          font-family: var(--font-clock);
+          font-size: var(--digit-size);
+          line-height: 1;
+          color: var(--digit-dim);
+          letter-spacing: 0.05em;
+          user-select: none;
+        }
+
+        .digit-display { display: flex; align-items: center; gap: 2px; }
+
+        /* hint below clock/duration — flashes red on invalid attempt */
+        .digit-hint {
+          margin-top: 6px;
+          font-size: var(--hint-size);
+          color: var(--hint-color);
+          transition: color 0.15s, opacity 0.15s;
+          min-height: 14px;
+        }
+
+        .digit-hint.flash {
+          color: #ff4b4b;
+          opacity: 1;
+        }
+
+        .colon {
+          font-family: var(--font-clock);
+          font-size: var(--digit-size);
+          line-height: 1;
+          color: var(--accent);
+          width: 14px;
+          text-align: center;
+          user-select: none;
+          animation: blink 1.8s ease-in-out infinite;
+        }
+
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.3; }
+        }
+
+        .cursor-bar {
+          width: 2px;
+          height: 28px;
+          background: var(--accent);
+          border-radius: 1px;
+          margin-left: 3px;
+          opacity: 0;
+          transition: opacity 0.1s;
+        }
+
+        .input-wrapper.focused .cursor-bar {
+          opacity: 1;
+          animation: cursor-blink 1s step-end infinite;
+        }
+
+        @keyframes cursor-blink {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0; }
+        }
+
+        #hidden-input {
+          position: fixed;
+          top: -9999px;
+          left: -9999px;
+          opacity: 0;
+          width: 1px;
+          height: 1px;
+        }
+
+        .hint {
+          margin-top: 6px;
+          font-size: var(--hint-size);
+          color: var(--hint-color);
+          opacity: 0.65;
+        }
+
+        /* ── GPU select ───────────────────────────────────────────────────────── */
+        .select-wrapper {
+          cursor: pointer;
+          justify-content: space-between;
+          height: var(--input-height);   /* match clock/duration height exactly */
+        }
+
+        .select-wrapper.open {
+          border-color: var(--border-focus);
+          box-shadow: 0 0 0 3px var(--glow);
+          border-radius: var(--border-radius) var(--border-radius) 0 0;
+          border-bottom-color: transparent;
+        }
+
+        .selected-value {
+          font-family: var(--font-ui);
+          font-size: var(--value-size-small);
+          line-height: 1;
+          color: var(--digit);
+          user-select: none;
+        }
+
+        .select-arrow {
+          font-size: 18px;
+          color: var(--accent);
+          transition: transform 0.2s;
+          user-select: none;
+          margin-left: auto;
+        }
+
+        .options-list {
+          display: none;
+          background: var(--surface);
+          border: var(--border-width) solid var(--border-focus);
+          border-top: none;
+          border-radius: 0 0 var(--border-radius) var(--border-radius);
+          overflow: hidden;
+        }
+
+        .options-list.open { display: block; }
+
+        .option {
+          padding: var(--padding-v) var(--padding-h);
+          font-family: var(--font-ui);
+          font-size: var(--value-size-small);
+          color: var(--digit);
+          cursor: pointer;
+          transition: background 0.15s;
+          user-select: none;
+        }
+
+        .option:hover    { background: var(--option-hover); }
+        .option.selected { background: var(--option-selected); color: var(--accent); }
+
+        /* ── Rack count input ────────────────────────────────────────────────── */
+        .rack-display {
+          font-family: var(--font-ui);
+          font-size: var(--value-size-small);
+          line-height: 1;
+          color: var(--digit);
+          flex: 1;
+          user-select: none;
+        }
+
+        .rack-display.dim { color: var(--digit-dim); }
+
+        .rack-wrapper-size {
+          height: var(--input-height-small);
+        }
+
+        .rack-btn-group {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          margin-left: auto;
+        }
+
+        .rack-btn {
+          width: 18px;
+          height: 18px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: rgba(74, 144, 217, 0.15);
+          border: 1px solid var(--border-focus);
+          border-radius: 3px;
+          color: var(--accent);
+          font-size: 10px;
+          line-height: 1;
+          cursor: pointer;
+          user-select: none;
+          transition: background 0.15s;
+        }
+
+        .rack-btn:hover  { background: rgba(74, 144, 217, 0.3); }
+        .rack-btn:active { background: rgba(74, 144, 217, 0.5); }
+
+        /* Always-visible range hint — flashes red on invalid attempt */
+        .rack-hint {
+          margin-top: 5px;
+          font-size: 11px;
+          color: var(--hint-color);
+          transition: color 0.15s;
+          min-height: 14px;
+        }
+
+        .rack-hint.flash {
+          color: #ff4b4b;
+        }
+
+        .rack-error { display: none; }  /* kept for error border logic, text replaced by rack-hint */
+
+        .input-wrapper.error {
+          border-color: #ff4b4b;
+          box-shadow: 0 0 0 3px rgba(255, 75, 75, 0.18);
+        }
+    </style>
+</head>
+<body>
+
+<!-- theme.js must load first — sets all CSS variables before any rendering -->
+<script src="theme.js"></script>
+
+<div id="root"></div>
+
+<script>
+    (function () {
+      'use strict';
+
+      // ── Streamlit protocol ────────────────────────────────────────────────────
+      function send(type, payload) {
+        window.parent.postMessage({ isStreamlitMessage: true, type, ...payload }, '*');
+      }
+      function setFrameHeight() {
+        send('streamlit:setFrameHeight', { height: document.body.scrollHeight + 10 });
+      }
+      function setComponentValue(val) {
+        send('streamlit:setComponentValue', { value: val });
+      }
+      function escHtml(str) {
+        return String(str)
+          .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      }
+
+      // ── Digit input — used by both clock and duration ─────────────────────────
+      function buildDigitInput(root, args, maxHours) {
+        let digits  = [0, 0, 0, 0];
+        let touched = false;   // false = show hh:mm placeholder, true = show digits
+
+        root.innerHTML = `
+          <div class="label" id="label-el">${escHtml(args.label || '')}</div>
+          <div class="input-wrapper" id="digit-wrapper" tabindex="0">
+            <input type="text" id="hidden-input" inputmode="numeric" autocomplete="off"/>
+            <div class="digit-display" id="digit-display">
+              <span class="digit-placeholder" id="placeholder">hh:mm</span>
+            </div>
+            <span class="cursor-bar"></span>
+          </div>
+          <div class="digit-hint" id="digit-hint">${escHtml(args.hint || '')}</div>
+        `;
+
+        const wrapper     = document.getElementById('digit-wrapper');
+        const hiddenIn    = document.getElementById('hidden-input');
+        const displayEl   = document.getElementById('digit-display');
+        const hintEl      = document.getElementById('digit-hint');
+
+        let flashTimer = null;
+
+        function flashInvalid() {
+          if (flashTimer) clearTimeout(flashTimer);
+          hintEl.classList.add('flash');
+          wrapper.classList.add('error');
+          flashTimer = setTimeout(() => {
+            hintEl.classList.remove('flash');
+            wrapper.classList.remove('error');
+            flashTimer = null;
+          }, 1200);
+        }
+
+        function buildDigitDOM() {
+          displayEl.innerHTML = `
+            <div class="digit-group">
+              <span class="digit dim" id="d0">0</span>
+              <span class="digit dim" id="d1">0</span>
+            </div>
+            <span class="colon">:</span>
+            <div class="digit-group">
+              <span class="digit dim" id="d2">0</span>
+              <span class="digit dim" id="d3">0</span>
+            </div>
+          `;
+        }
+
+        function getDEls() {
+          return [0,1,2,3].map(i => document.getElementById('d' + i));
+        }
+
+        function getValue() {
+          if (!touched) return null;
+          const h = String(digits[0] * 10 + digits[1]).padStart(2, '0');
+          const m = String(digits[2] * 10 + digits[3]).padStart(2, '0');
+          return h + ':' + m;
+        }
+
+        function render() {
+          if (!touched) return;
+          const dEls = getDEls();
+          if (!dEls[0]) return;
+          dEls.forEach((el, i) => { el.textContent = digits[i]; });
+          const first = digits.findIndex(d => d !== 0);
+          if (first === -1) {
+            dEls.forEach(el => el.classList.remove('dim'));
+          } else {
+            dEls.forEach((el, i) => el.classList.toggle('dim', i < first));
+          }
+        }
+
+        function activateTouched() {
+          if (touched) return;
+          touched = true;
+          buildDigitDOM();
+          render();
+        }
+
+        function pushDigit(d) {
+          activateTouched();
+          const next = [digits[1], digits[2], digits[3], d];
+          const h = next[0] * 10 + next[1];
+          const m = next[2] * 10 + next[3];
+          if (h > maxHours || m > 59) { flashInvalid(); return; }
+          if (maxHours === 24 && h === 24 && m > 0) { flashInvalid(); return; }
+          if (maxHours === 23 && next[0] === 2 && next[1] > 3) { flashInvalid(); return; }
+          digits = next;
+          render();
+        }
+
+        function popDigit() {
+          if (!touched) return;
+          digits = [0, ...digits.slice(0, 3)];
+          render();
+        }
+
+        wrapper.addEventListener('click',  () => hiddenIn.focus());
+        wrapper.addEventListener('focus',  () => hiddenIn.focus());
+
+        hiddenIn.addEventListener('focus', () => wrapper.classList.add('focused'));
+        hiddenIn.addEventListener('blur',  () => {
+          wrapper.classList.remove('focused');
+
+          // Snap to nearest 30 minutes if args.snap is set (duration only)
+          if (touched && args.snap === 30) {
+            const totalMins = (digits[0] * 10 + digits[1]) * 60 + (digits[2] * 10 + digits[3]);
+            const snapped   = Math.round(totalMins / 30) * 30;
+            const maxMins   = maxHours * 60;
+            const clamped   = Math.min(snapped, maxMins);
+            const hh = Math.floor(clamped / 60);
+            const mm = clamped % 60;
+            digits = [Math.floor(hh / 10), hh % 10, Math.floor(mm / 10), mm % 10];
+            render();
+          }
+
+          setComponentValue(getValue());
+        });
+
+        hiddenIn.addEventListener('keydown', (e) => {
+          if (e.key >= '0' && e.key <= '9') {
+            e.preventDefault();
+            pushDigit(parseInt(e.key, 10));
+          } else if (e.key === 'Backspace') {
+            e.preventDefault();
+            popDigit();
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            setComponentValue(getValue());
+            hiddenIn.blur();
+          }
+        });
+
+        setTimeout(() => {
+          setFrameHeight();
+          setComponentValue(getValue());  // emits null until touched
+        }, 50);
+      }
+
+      // ── GPU select ────────────────────────────────────────────────────────────
+      function buildGpuSelect(root, args) {
+        const options = args.options || ['Low (20 kW)', 'Medium (40 kW)', 'High (55 kW)'];
+        let selected  = args.initial && options.includes(args.initial)
+                        ? args.initial : options[0];
+        let isOpen = false;
+
+        root.innerHTML = `
+          <div class="label" id="label-el">${escHtml(args.label || '')}</div>
+          <div class="input-wrapper select-wrapper" id="select-wrapper" tabindex="0">
+            <span class="selected-value" id="selected-value">${escHtml(selected)}</span>
+            <span class="select-arrow" id="select-arrow">▾</span>
+          </div>
+          <div class="options-list" id="options-list">
+            ${options.map(o => `
+              <div class="option${o === selected ? ' selected' : ''}"
+                   data-value="${escHtml(o)}">${escHtml(o)}</div>
+            `).join('')}
+          </div>
+        `;
+
+        const wrapper     = document.getElementById('select-wrapper');
+        const selectedEl  = document.getElementById('selected-value');
+        const arrowEl     = document.getElementById('select-arrow');
+        const optionsList = document.getElementById('options-list');
+        const optionEls   = Array.from(optionsList.querySelectorAll('.option'));
+
+        function open()  {
+          isOpen = true;
+          wrapper.classList.add('open');
+          optionsList.classList.add('open');
+          arrowEl.style.transform = 'rotate(180deg)';
+          setTimeout(setFrameHeight, 20);
+        }
+
+        function close() {
+          isOpen = false;
+          wrapper.classList.remove('open');
+          optionsList.classList.remove('open');
+          arrowEl.style.transform = 'rotate(0deg)';
+          setTimeout(setFrameHeight, 20);
+        }
+
+        function selectOption(value) {
+          selected = value;
+          selectedEl.textContent = value;
+          optionEls.forEach(el => el.classList.toggle('selected', el.dataset.value === value));
+          close();
+          setComponentValue(value);
+        }
+
+        wrapper.addEventListener('click', (e) => { e.stopPropagation(); isOpen ? close() : open(); });
+        wrapper.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); isOpen ? close() : open(); }
+          if (e.key === 'Escape') close();
+        });
+
+        optionEls.forEach(el => {
+          el.addEventListener('click', (e) => { e.stopPropagation(); selectOption(el.dataset.value); });
+        });
+
+        document.addEventListener('click', () => { if (isOpen) close(); });
+
+        setTimeout(() => { setFrameHeight(); setComponentValue(selected); }, 50);
+      }
+
+      // ── Rack count input ──────────────────────────────────────────────────────
+      function buildRackCount(root, args) {
+        let value   = parseInt(args.initial) || 10;
+        let minVal  = 1;
+        let maxVal  = parseInt(args.max_racks) || 60;
+
+        root.innerHTML = `
+          <div class="label" id="label-el">${escHtml(args.label || '')}</div>
+          <div class="input-wrapper rack-wrapper-size" id="rack-wrapper" tabindex="0">
+            <input type="text" id="hidden-input" inputmode="numeric" autocomplete="off"/>
+            <span class="rack-display" id="rack-display">${value}</span>
+            <div class="rack-btn-group">
+              <div class="rack-btn" id="btn-up">▲</div>
+              <div class="rack-btn" id="btn-down">▼</div>
+            </div>
+          </div>
+          <div class="rack-hint" id="rack-hint">Jobs must use ${minVal}–<span id="hint-max">${maxVal}</span> racks</div>
+          <div class="rack-error" id="rack-error"></div>
+        `;
+
+        const wrapper    = document.getElementById('rack-wrapper');
+        const hiddenIn   = document.getElementById('hidden-input');
+        const displayEl  = document.getElementById('rack-display');
+        const hintEl     = document.getElementById('rack-hint');
+        const hintMaxEl  = document.getElementById('hint-max');
+        const btnUp      = document.getElementById('btn-up');
+        const btnDown    = document.getElementById('btn-down');
+
+        let flashTimer = null;
+
+        function flashInvalid() {
+          // Momentarily turn the hint text red, then fade back
+          if (flashTimer) clearTimeout(flashTimer);
+          hintEl.classList.add('flash');
+          wrapper.classList.add('error');
+          flashTimer = setTimeout(() => {
+            hintEl.classList.remove('flash');
+            wrapper.classList.remove('error');
+            flashTimer = null;
+          }, 1200);
+        }
+
+        // ── Validation & render ─────────────────────────────────────────────────
+        function isValid(v) {
+          return v >= minVal && v <= maxVal;
+        }
+
+        function render() {
+          displayEl.textContent = value;
+          displayEl.classList.toggle('dim', value === 0);
+          // Only show persistent error border when sidebar has reduced max below current value
+          if (!isValid(value) && flashTimer === null) {
+            wrapper.classList.add('error');
+            hintEl.classList.add('flash');
+          } else if (isValid(value) && flashTimer === null) {
+            wrapper.classList.remove('error');
+            hintEl.classList.remove('flash');
+          }
+          setTimeout(setFrameHeight, 20);
+        }
+
+        function applyValue(v) {
+          value = v;
+          render();
+          setComponentValue(value);
+        }
+
+        // ── Typing: append digits, backspace removes last ───────────────────────
+        let rawStr = String(value);
+
+        function commitRaw() {
+          const parsed = parseInt(rawStr, 10);
+          value = isNaN(parsed) ? minVal : parsed;
+          rawStr = String(value);
+          render();
+          setComponentValue(value);
+        }
+
+        hiddenIn.addEventListener('keydown', (e) => {
+          if (e.key >= '0' && e.key <= '9') {
+            e.preventDefault();
+            const next = rawStr === '0' ? e.key : rawStr + e.key;
+            if (next.length > 4) return;
+            const parsed = parseInt(next, 10);
+            if (!isNaN(parsed) && parsed > maxVal) {
+              flashInvalid();
+              return;   // silent reject + flash
+            }
+            rawStr = next;
+            value = isNaN(parsed) ? 0 : parsed;
+            render();
+          } else if (e.key === 'Backspace') {
+            e.preventDefault();
+            rawStr = rawStr.slice(0, -1) || '0';
+            value = parseInt(rawStr, 10) || 0;
+            render();
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            commitRaw();
+            hiddenIn.blur();
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (value >= maxVal) { flashInvalid(); return; }
+            applyValue(value + 1);
+            rawStr = String(value);
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (value <= minVal) { flashInvalid(); return; }
+            applyValue(Math.max(value - 1, minVal));
+            rawStr = String(value);
+          }
+        });
+
+        // ── +/- buttons ─────────────────────────────────────────────────────────
+        btnUp.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (value >= maxVal) { flashInvalid(); return; }
+          applyValue(value + 1);
+          rawStr = String(value);
+        });
+
+        btnDown.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (value > minVal) { applyValue(value - 1); rawStr = String(value); }
+        });
+
+        // ── Focus handling ───────────────────────────────────────────────────────
+        wrapper.addEventListener('click', () => hiddenIn.focus());
+        wrapper.addEventListener('focus', () => hiddenIn.focus());
+
+        hiddenIn.addEventListener('focus', () => {
+          if (!wrapper.classList.contains('error')) wrapper.classList.add('focused');
+        });
+        hiddenIn.addEventListener('blur', () => {
+          wrapper.classList.remove('focused');
+          commitRaw();
+        });
+
+        // ── Dynamic max update from Streamlit reruns ─────────────────────────────
+        function updateMax(newMax) {
+          maxVal = newMax;
+          if (hintMaxEl) hintMaxEl.textContent = newMax;
+          render();
+          setComponentValue(value);
+        }
+
+        render();
+        setTimeout(() => { setFrameHeight(); setComponentValue(value); }, 50);
+
+        return { updateMax };
+      }
+
+      // ── Main ──────────────────────────────────────────────────────────────────
+      const root      = document.getElementById('root');
+      let initialized = false;
+      let rackInstance = null;
+
+      window.addEventListener('message', function (e) {
+        if (!e.data || e.data.type !== 'streamlit:render') return;
+
+        const args = e.data.args || {};
+
+        if (!initialized) {
+          initialized = true;
+          if      (args.type === 'clock')      buildDigitInput(root, args, 23);
+          else if (args.type === 'duration')   buildDigitInput(root, args, 24);
+          else if (args.type === 'gpu')        buildGpuSelect(root, args);
+          else if (args.type === 'rack_count') rackInstance = buildRackCount(root, args);
+        }
+
+        // Subsequent reruns: update label; for rack_count also update dynamic max
+        const labelEl = document.getElementById('label-el');
+        if (labelEl && args.label) labelEl.textContent = args.label;
+
+        if (args.type === 'rack_count' && rackInstance && args.max_racks != null) {
+          rackInstance.updateMax(parseInt(args.max_racks));
+        }
+      });
+
+      // Signal ready — Streamlit responds with streamlit:render
+      send('streamlit:componentReady', { apiVersion: 1 });
+    })();
+</script>
+</body>
+</html>

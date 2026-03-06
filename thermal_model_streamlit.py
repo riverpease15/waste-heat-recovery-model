@@ -1,3 +1,16 @@
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from scheduler_inputs import (
+    clock_time_input,
+    duration_time_input,
+    gpu_power_input,
+    rack_count_input,
+    rack_count_valid,
+    duration_to_hours
+)
+
 import streamlit as st
 
 # Page configuration - MUST be first Streamlit command
@@ -26,6 +39,12 @@ K_AIR = 0.026  # Thermal conductivity W/(m·K)
 CP_WATER = 4180.0  # J/(kg·K) specific heat of water
 T_SUPPLY_C = 22.8  # °C this is from ColdLogik ATL1 spec
 T_RECOVERY_TARGET_C = 40.0  # °C, waste heat recovery design target (known)
+
+# TOU Constants
+TOU_ON_PEAK_RATE  = 0.175029   # $/kWh
+TOU_OFF_PEAK_RATE = 0.050353   # $/kWh
+TOU_ON_PEAK_START = 14
+TOU_ON_PEAK_END   = 19
 
 st.title("🌡️ ATL01 PACE Room - Thermal Model")
 st.markdown("**Interactive thermal analysis for high-density data center cooling**")
@@ -71,6 +90,8 @@ if 'sim_playing' not in st.session_state:
     st.session_state.sim_playing = False
 if 'scroll_to_viz' not in st.session_state:
     st.session_state.scroll_to_viz = False
+if 'tou_costs' not in st.session_state:
+    st.session_state.tou_costs = None
 
 st.sidebar.subheader("❄️ Cooling System")
 dclc_effectiveness = st.sidebar.slider("DCLC Effectiveness", 0.0, 0.60, 0.35, 0.05,
@@ -130,6 +151,7 @@ if st.session_state.sim_fingerprint is not None and _current_fingerprint != st.s
     st.session_state.sim_fingerprint = None
     st.session_state.sim_stale = True
     st.session_state.sim_playing = False
+    st.session_state.tou_costs = None
 
 # ===== JOB SCHEDULING SECTION =====
 st.header("📅 Job Scheduler")
@@ -155,6 +177,60 @@ rack_power_kw = FULL_GPU_RACK_KW
 
 # Assumed baseline power per rack when no job is running (may need to update)
 IDLE_RACK_KW = 15.0
+
+def is_on_peak(hour):
+    return TOU_ON_PEAK_START <= (hour % 24) < TOU_ON_PEAK_END
+
+def calculate_tou_cost(sim_data):
+    """
+    Iterates every simulation timestep.
+    Job load = total IT load minus idle baseline (total_racks × IDLE_RACK_KW).
+    No PUE — incremental job load only.
+    """
+    if sim_data is None:
+        return None
+
+    times_h       = sim_data['times_h']
+    Q_total_kw    = sim_data['Q_total_kw']
+    total_racks   = int(sim_data.get('total_racks', 0))
+    idle_kw_total = total_racks * IDLE_RACK_KW
+
+    n_steps  = len(times_h)
+    dt_hours = (times_h[1] - times_h[0]) if n_steps > 1 else (1.0 / 60.0)
+
+    job_on_peak_kwh  = 0.0;  job_off_peak_kwh  = 0.0
+    job_on_peak_cost = 0.0;  job_off_peak_cost = 0.0
+
+    for step in range(n_steps):
+        t_h     = float(times_h[step]) % 24
+        it_kw   = float(Q_total_kw[step])
+        job_kw  = max(0.0, it_kw - idle_kw_total)
+        on_peak = is_on_peak(t_h)
+        rate    = TOU_ON_PEAK_RATE if on_peak else TOU_OFF_PEAK_RATE
+        energy  = job_kw * dt_hours
+        cost    = energy * rate
+
+        if on_peak:
+            job_on_peak_kwh  += energy
+            job_on_peak_cost += cost
+        else:
+            job_off_peak_kwh += energy
+            job_off_peak_cost += cost
+
+    job_total_kwh  = job_on_peak_kwh  + job_off_peak_kwh
+    job_total_cost = job_on_peak_cost + job_off_peak_cost
+    off_peak_pct   = (job_off_peak_kwh / job_total_kwh * 100) if job_total_kwh > 0 else 0.0
+
+    return {
+        'job_total_kwh':      job_total_kwh,
+        'job_on_peak_kwh':    job_on_peak_kwh,
+        'job_off_peak_kwh':   job_off_peak_kwh,
+        'job_total_cost':     job_total_cost,
+        'job_on_peak_cost':   job_on_peak_cost,
+        'job_off_peak_cost':  job_off_peak_cost,
+        'off_peak_pct':       off_peak_pct,
+    }
+
 
 
 def calculate_thermal_system(room_length, room_width, room_height,
@@ -643,37 +719,47 @@ with col1:
     job_col1, job_col2, job_col3 = st.columns(3)
 
     with job_col1:
-        job_start_time_input = st.time_input("Start Time",
-                                             value=None,
-                                             step=900,  # 15 minute increments
-                                             help="When the job starts (24-hour format)")
+        job_start_time_input = clock_time_input(
+            label="Start Time",
+            key="job_start_clock",
+        )
 
     with job_col2:
-        job_duration_hours = st.number_input("Duration (hours)", min_value=0.5, max_value=24.0, value=2.0, step=0.5,
-                                             help="How long the job runs")
+        duration_raw = duration_time_input(
+            label="Duration",
+            key="job_duration",
+        )
+        job_duration_hours = duration_to_hours(duration_raw)
 
     with job_col3:
-        gpu_power_level = st.selectbox("GPU Power Level",
-                                       options=["Low (20 kW)", "Medium (40 kW)", "High (55 kW)"],
-                                       index=1,
-                                       help="Power consumption per rack during job")
-        # Extract power value
+        gpu_power_level = gpu_power_input(
+            label="GPU Power Level",
+            options=["Low (20 kW)", "Medium (40 kW)", "High (55 kW)"],
+            default="Medium (40 kW)",
+            key="job_gpu",
+        )
         power_map = {"Low (20 kW)": 20.0, "Medium (40 kW)": 40.0, "High (55 kW)": 55.0}
         job_power_kw = power_map[gpu_power_level]
 
     total_available_racks = num_rows * racks_per_row
-    job_num_racks = st.number_input("Number of Racks",
-                                    min_value=1,
-                                    max_value=total_available_racks,
-                                    value=min(10, total_available_racks),
-                                    step=1,
-                                    help=f"Number of racks needed (max {total_available_racks} available)")
+    job_num_racks = rack_count_input(
+        label="Number of Racks",
+        default=min(10, total_available_racks),
+        min_racks=1,
+        max_racks=total_available_racks,   # re-validated dynamically on every rerun
+        key="job_rack_count",
+    )
 
     # Add job button
-    add_button_disabled = job_start_time_input is None
+    add_button_disabled = (
+        job_start_time_input is None        # clock still showing hh:mm placeholder
+        or duration_raw is None             # duration still showing hh:mm placeholder
+        or job_duration_hours == 0.0        # duration of 00:00 is not valid
+        or not rack_count_valid(job_num_racks, min_racks=1, max_racks=total_available_racks)
+    )
+
     if st.button("➕ Add Job", type="primary", use_container_width=True, disabled=add_button_disabled):
-        job_start_hour = job_start_time_input.hour
-        job_start_min = job_start_time_input.minute
+        job_start_hour, job_start_min = map(int, job_start_time_input.split(":"))
         job_start_time = job_start_hour + job_start_min / 60.0
         job_end_time = job_start_time + job_duration_hours
 
@@ -693,10 +779,18 @@ with col1:
 
 with col2:
     st.subheader("⚡ Current Status")
-    st.metric("Total Jobs", len(st.session_state.scheduled_jobs),
-              help="Number of GPU jobs currently scheduled")
-    st.metric("Available Racks", f"{total_available_racks}",
-              help="Total server racks in the room based on row and rack configuration")
+
+    status_left, status_right = st.columns(2)
+    with status_left:
+        st.metric("Total Jobs",      len(st.session_state.scheduled_jobs))
+        st.metric("Available Racks", f"{total_available_racks}")
+    with status_right:
+        st.metric("Off-Peak Rate", "5.04¢/kWh",
+                  help="Georgia Power TOU-HLF-16 — all hours outside 2PM–7PM")
+        st.metric("On-Peak Rate",  "17.50¢/kWh",
+                  delta="Active (14:00–19:00)",
+                  delta_color="inverse",
+                  help="June–Sep, Mon–Fri, 2PM–7PM under TOU-HLF-16")
 
     # Play button (placeholder for now)
     st.markdown("---")
@@ -712,6 +806,7 @@ with col2:
             num_air_handlers, cfm_per_handler,
             inlet_temp_c,
         )
+        st.session_state.tou_costs = calculate_tou_cost(st.session_state.sim_data)
         st.session_state.sim_frame = 0
         st.session_state.sim_fingerprint = _current_fingerprint
         st.session_state.sim_stale = False
@@ -849,7 +944,7 @@ if len(st.session_state.scheduled_jobs) > 0:
                 ({job['duration']:.1f}h) |
                 {job['power_level']} |
                 {job['num_racks']} racks |
-                {job['num_racks'] * job['power_kw']:.0f} kW total
+                {job['num_racks'] * (job['power_kw'] - IDLE_RACK_KW):.0f} kW above idle
             </div>
             """, unsafe_allow_html=True)
 
@@ -955,10 +1050,7 @@ def plot_thermal_field(results):
     _m = int(round((results["time_of_day"] - _h) * 60))
     ax1.set_title(
         f'Thermal Map: {results["active_racks"]}/{results["total_racks"]} Active Racks'
-        f'  |  IT Load: {results["Q_total_kw"]:.0f} kW\n'
-        f'Room: {results["T_room"] * 9 / 5 + 32:.1f}°F'
-        f'  |  Outdoor: {results["T_outdoor"] * 9 / 5 + 32:.1f}°F'
-        f'  |  Time: {_h:02d}:{_m:02d}',
+        f'  |  Current IT Load: {results["Q_total_kw"]:.0f} kW',
         fontsize=11, fontweight='bold')
 
     ax1.set_xlim([0, results['room_length']])
@@ -1042,7 +1134,7 @@ if sim is not None:
     frame_idx = st.session_state.sim_frame
     n_frames = len(sim['frame_indices'])
 
-    btn_col1, btn_col2, btn_col3, btn_col4, btn_col5 = st.columns([1, 1, 6, 1, 1])
+    btn_col1, btn_col2, btn_col3, _space = st.columns([1, 1, 1, 5])
     with btn_col1:
         if st.button("⏮ Prev", use_container_width=True, disabled=st.session_state.sim_playing):
             st.session_state.sim_frame = max(0, frame_idx - 1)
@@ -1056,7 +1148,7 @@ if sim is not None:
             if st.button("▶️ Play", use_container_width=True):
                 st.session_state.sim_playing = True
                 st.rerun()
-    with btn_col4:
+    with btn_col3:
         if st.button("Next ⏭", use_container_width=True, disabled=st.session_state.sim_playing):
             st.session_state.sim_frame = min(n_frames - 1, frame_idx + 1)
             st.rerun()
@@ -1109,6 +1201,67 @@ with dash4:
     st.metric("Total Cooling Power", f"{results['p_cooling_total_kw']:.0f} kW",
               help="Pumps + Chiller + Fans combined electrical demand",
               border=True)
+
+# ── TOU Scheduling Metrics — live, frame-accurate ────────────────────────
+# All four metrics computed up to the current simulation frame.
+# Job load = total IT − idle baseline (total_racks × IDLE_RACK_KW), floored at 0.
+if sim is not None:
+    _step          = sim['frame_indices'][st.session_state.sim_frame]
+    _dt_h          = float(sim['times_h'][1] - sim['times_h'][0])
+    _idle_kw_total = int(sim['total_racks']) * IDLE_RACK_KW
+
+    _cum_cost      = 0.0   # Accumulated Job IT Cost
+    _cum_kwh       = 0.0   # Running Total IT Job Load (kWh)
+    _cum_offpk_kwh = 0.0   # Off-peak portion of the above
+
+    for _s in range(_step + 1):
+        _t_h    = float(sim['times_h'][_s]) % 24
+        _job_kw = max(0.0, float(sim['Q_total_kw'][_s]) - _idle_kw_total)
+        _rate   = TOU_ON_PEAK_RATE if is_on_peak(_t_h) else TOU_OFF_PEAK_RATE
+        _e      = _job_kw * _dt_h
+        _cum_cost += _e * _rate
+        _cum_kwh  += _e
+        if not is_on_peak(_t_h):
+            _cum_offpk_kwh += _e
+
+    _cur_job_kw  = max(0.0, float(sim['Q_total_kw'][_step]) - _idle_kw_total)
+    _offpk_pct   = (_cum_offpk_kwh / _cum_kwh * 100) if _cum_kwh > 0 else 0.0
+    _onpk_kwh    = _cum_kwh - _cum_offpk_kwh
+    _eff_color   = "normal" if _offpk_pct >= 80 else "inverse" if _offpk_pct < 50 else "off"
+
+    tou1, tou2, tou3, tou4 = st.columns(4)
+    with tou1:
+        st.metric(
+            "Accumulated Job IT Cost",
+            f"${_cum_cost:.2f}",
+            help="Running IT energy cost for scheduled jobs up to current simulation time. "
+                 "Idle baseline excluded. No PUE.",
+            border=True,
+        )
+    with tou2:
+        st.metric(
+            "Current Job IT Load",
+            f"{_cur_job_kw:.0f} kW",
+            help="Incremental IT power from active jobs at this timestep. "
+                 "Idle baseline excluded.",
+            border=True,
+        )
+    with tou3:
+        st.metric(
+            "Running Job IT Load",
+            f"{_cum_kwh:.1f} kWh",
+            help="Cumulative incremental IT energy consumed by jobs up to current time. "
+                 "Idle baseline excluded.",
+            border=True,
+        )
+    with tou4:
+        st.metric(
+            "Job Load Off-Peak",
+            f"{_offpk_pct:.0f}%",
+            help="Percentage of cumulative job IT energy that ran during off-peak hours "
+                 "(outside 14:00–19:00).",
+            border=True,
+        )
 
 st.divider()
 
