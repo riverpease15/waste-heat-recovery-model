@@ -823,7 +823,7 @@ if len(st.session_state.scheduled_jobs) > 0:
     job_blocks_html = ""
     for job_idx, job in enumerate(sorted_jobs):
         start_pct = (job['start_time'] / 24) * 100
-        duration_pct = (job['duration'] / 24) * 100
+        duration_pct = min((job['duration'] / 24) * 100, 100 - start_pct)
 
         # Offset jobs vertically if they overlap
         top_position = 10 + (job_idx % 2) * 55  # Alternate between two rows
@@ -852,6 +852,7 @@ if len(st.session_state.scheduled_jobs) > 0:
         .timeline-grid {{
             position: relative;
             height: 150px;
+            overflow: hidden;
             background: repeating-linear-gradient(
                 90deg,
                 rgba(255,255,255,0.05) 0px,
