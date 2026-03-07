@@ -734,11 +734,11 @@ with col1:
     with job_col3:
         gpu_power_level = gpu_power_input(
             label="GPU Power Level",
-            options=["Low (20 kW)", "Medium (40 kW)", "High (55 kW)"],
-            default="Medium (40 kW)",
+            options=["Low (20 kW)", "Medium (50 kW)", "High (60 kW)"],
+            default="Medium (50 kW)",
             key="job_gpu",
         )
-        power_map = {"Low (20 kW)": 20.0, "Medium (40 kW)": 40.0, "High (55 kW)": 55.0}
+        power_map = {"Low (20 kW)": 20.0, "Medium (50 kW)": 50.0, "High (60 kW)": 60.0}
         job_power_kw = power_map[gpu_power_level]
 
     total_available_racks = num_rows * racks_per_row
