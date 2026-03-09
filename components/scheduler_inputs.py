@@ -21,7 +21,7 @@ import streamlit.components.v1 as components
 
 _FRONTEND_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    "scheduler_inputs_frontend",
+    "scheduler_inputs",
 )
 
 _component_func = components.declare_component(

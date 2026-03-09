@@ -1,8 +1,11 @@
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from scheduler_inputs import (
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_APP_DIR)
+sys.path.insert(0, _PROJECT_ROOT)
+
+from components.scheduler_inputs import (
     clock_time_input,
     duration_time_input,
     gpu_power_input,
@@ -13,9 +16,8 @@ from scheduler_inputs import (
 
 import streamlit as st
 
-# Page configuration - MUST be first Streamlit command
 st.set_page_config(
-    page_title="ATL01 Data Center Thermal Model",
+    page_title="ATL01 Data Center Model",
     page_icon="🌡️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -27,10 +29,11 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Patch
 import streamlit.components.v1 as components
 
-"""
-ATL01 PACE ROOM - INTERACTIVE THERMAL MODEL
-Streamlit Application for Local Deployment
-"""
+_timeline_component = components.declare_component(
+    "job_timeline",
+    path=os.path.join(_PROJECT_ROOT, "components", "timeline"),
+)
+
 
 # Physical constants
 RHO = 1.184  # Air density kg/m³
@@ -40,11 +43,11 @@ CP_WATER = 4180.0  # J/(kg·K) specific heat of water
 T_SUPPLY_C = 22.8  # °C this is from ColdLogik ATL1 spec
 T_RECOVERY_TARGET_C = 40.0  # °C, waste heat recovery design target (known)
 
-# TOU Constants
-TOU_ON_PEAK_RATE  = 0.175029   # $/kWh
-TOU_OFF_PEAK_RATE = 0.050353   # $/kWh
-TOU_ON_PEAK_START = 14
-TOU_ON_PEAK_END   = 19
+from core.constants import (
+    TOU_ON_PEAK_RATE, TOU_OFF_PEAK_RATE,
+    TOU_ON_PEAK_START, TOU_ON_PEAK_END,
+    IDLE_RACK_KW, POWER_LEVELS, is_on_peak,
+)
 
 st.title("🌡️ ATL01 PACE Room - Thermal Model")
 st.markdown("**Interactive thermal analysis for high-density data center cooling**")
@@ -71,9 +74,11 @@ room_width = st.sidebar.slider("Room Width (m)", 5.0, 30.0, 23.6, 0.1,
 room_height = st.sidebar.slider("Room Height (m)", 2.5, 8.0, 6.4, 0.1,
                                 help="Height affects air circulation and stratification")
 num_rows = st.sidebar.slider("Number of Rows", 1, 6, 3, 1,
-                             help="Rows of server racks in the room")
+                             help="Rows of server racks in the room",
+                             key="num_rows")
 racks_per_row = st.sidebar.slider("Racks per Row", 5, 30, 20, 1,
-                                  help="Number of server racks in each row")
+                                  help="Number of server racks in each row",
+                                  key="racks_per_row")
 
 # Initialize session state for scheduled jobs
 if 'scheduled_jobs' not in st.session_state:
@@ -92,6 +97,10 @@ if 'scroll_to_viz' not in st.session_state:
     st.session_state.scroll_to_viz = False
 if 'tou_costs' not in st.session_state:
     st.session_state.tou_costs = None
+if 'auto_run_sim' not in st.session_state:
+    st.session_state.auto_run_sim = False
+if 'timeline_version' not in st.session_state:
+    st.session_state.timeline_version = 0
 
 st.sidebar.subheader("❄️ Cooling System")
 dclc_effectiveness = st.sidebar.slider("DCLC Effectiveness", 0.0, 0.60, 0.35, 0.05,
@@ -175,12 +184,6 @@ MIXED_GPU_RACK_KW = 40.0  # conservative GPU racks
 total_racks = num_rows * racks_per_row
 rack_power_kw = FULL_GPU_RACK_KW
 
-# Assumed baseline power per rack when no job is running (may need to update)
-IDLE_RACK_KW = 15.0
-
-def is_on_peak(hour):
-    return TOU_ON_PEAK_START <= (hour % 24) < TOU_ON_PEAK_END
-
 def calculate_tou_cost(sim_data):
     """
     Iterates every simulation timestep.
@@ -240,7 +243,7 @@ def calculate_thermal_system(room_length, room_width, room_height,
                              inlet_temp_c, waste_threshold_c, cfm_per_handler,
                              time_of_day, cdu_flow_gpm=150.0, num_cdus=3,
                              delta_p_kpa=200.0, pump_eta=0.75, cop=4.0,
-                             rack_powers_kw=None):
+                             rack_powers_kw=None, T_room_transient=None):
     """Calculate thermal system with physically accurate equations
 
     Heat Flow Stages:
@@ -347,24 +350,25 @@ def calculate_thermal_system(room_length, room_width, room_height,
     UA_FLOOR = 0.5 * 640  # W/K — floor slab, 640 m²
     T_GROUND = 17.0  # °C — constant ground temperature
 
-    # Thermal capacitance (for future time-domain simulation)
-    THERMAL_CAPACITANCE_MJK = RHO * 4096 * CP / 1e6  # ρ × V × Cp = 4.88 MJ/K
+    # Effective thermal capacitance: air + equipment + shallow concrete slab
+    C_air_J = RHO * room_length * room_width * room_height * CP
+    C_equip_J = total_racks * 500.0 * 500.0
+    C_slab_J = (room_length * room_width) * 0.05 * 2300.0 * 880.0
+    THERMAL_CAPACITANCE_MJK = (C_air_J + C_equip_J + C_slab_J) / 1e6
 
     # === PHYSICS-BASED TEMPERATURE CALCULATION ===
-    # Heat remaining from IT load to be handled by room air
     Q_REMAINING_IT_W = Q_TO_ROOM_AIR_W
 
-    # Solve for T_room analytically including envelope:
-    #   T_room = T_inlet + (Q_remaining_IT + Q_walls - Q_floor) / (m_dot × Cp)
-    # where Q_walls = UA_WALLS × (T_outdoor - T_room)
-    #       Q_floor = UA_FLOOR × (T_room - T_ground)
-    # Both depend on T_room, so rearrange:
-    #   T_room × (m_dot×Cp + UA_WALLS + UA_FLOOR) =
-    #       T_inlet × m_dot×Cp + Q_remaining_IT + UA_WALLS × T_outdoor + UA_FLOOR × T_ground
-    m_dot_Cp = mass_flow_kg_s * CP if mass_flow_kg_s > 0 else 1.0  # avoid div-by-zero
+    m_dot_Cp = mass_flow_kg_s * CP if mass_flow_kg_s > 0 else 1.0
 
-    T_room_c = (inlet_temp_c * m_dot_Cp + Q_REMAINING_IT_W
-                + UA_WALLS * T_outdoor_c + UA_FLOOR * T_GROUND) / (m_dot_Cp + UA_WALLS + UA_FLOOR)
+    # Steady-state equilibrium temperature (used as fallback)
+    T_room_ss = (inlet_temp_c * m_dot_Cp + Q_REMAINING_IT_W
+                 + UA_WALLS * T_outdoor_c + UA_FLOOR * T_GROUND) / (m_dot_Cp + UA_WALLS + UA_FLOOR)
+
+    # When running the time-domain simulation, use the ODE-integrated
+    # temperature which accounts for thermal mass — the room heats up
+    # gradually under load and cools down gradually after jobs end.
+    T_room_c = T_room_transient if T_room_transient is not None else T_room_ss
 
     # Now compute actual envelope heat flows at the solved T_room
     Q_WALLS_W = UA_WALLS * (T_outdoor_c - T_room_c)  # positive = heat entering room
@@ -597,102 +601,92 @@ def build_sim_data(scheduled_jobs,
                    num_air_handlers, cfm_per_handler,
                    inlet_temp_c,
                    dt_sim_s=60,
-                   dt_vis_s=900,  # new frame every 15 minutes
+                   dt_vis_s=900,
                    horizon_hours=24):
     total_racks = int(num_rows * racks_per_row)
     room_volume = room_length * room_width * room_height
     n_steps = int(horizon_hours * 3600 / dt_sim_s) + 1
     times_h = np.arange(n_steps, dtype=np.float64) * dt_sim_s / 3600.0
 
-    # ── Per-timestep rack power assignment ───────────────────────────────────
-    # Same logic as the static model's rack layout, but now per-timestep.
-    # Each rack starts at IDLE_RACK_KW. Active jobs overwrite racks sequentially.
+    # ── Vectorised outdoor temperature ────────────────────────────────────────
+    T_outdoor_arr = 26.5 + 5.5 * np.sin(2.0 * np.pi * (times_h - 9.0) / 24.0)
 
-    rack_powers_kw = np.zeros((n_steps, total_racks), dtype=np.float32)
-    Q_total_kw = np.zeros(n_steps, dtype=np.float32)
-    T_outdoor_arr = np.zeros(n_steps, dtype=np.float64)
-
+    # ── Pre-extract job arrays for fast inner loop ────────────────────────────
     jobs_sorted = sorted(scheduled_jobs,
                          key=lambda j: (j.get('start_time', 0.0), j.get('id', 0)))
+    n_jobs = len(jobs_sorted)
+    j_starts = np.array([j.get('start_time', 0.0) for j in jobs_sorted], dtype=np.float64)
+    j_ends   = np.array([j.get('end_time', -1.0)  for j in jobs_sorted], dtype=np.float64)
+    j_powers = np.array([j.get('power_kw', 0.0)   for j in jobs_sorted], dtype=np.float32)
+    j_nracks = np.array([j.get('num_racks', 0)     for j in jobs_sorted], dtype=np.int32)
 
-    for k, t_h in enumerate(times_h):
+    # ── Per-timestep rack power assignment ────────────────────────────────────
+    # Broadcast active-job mask: shape (n_steps, n_jobs)
+    active = ((times_h[:, None] >= j_starts[None, :])
+              & (times_h[:, None] < j_ends[None, :])
+              & (times_h[:, None] < 24.0))
 
-        # Outdoor temperature at this timestep — same formula as static model
-        T_outdoor_arr[k] = 26.5 + 5.5 * np.sin(2.0 * np.pi * (t_h - 9.0) / 24.0)
+    rack_powers_kw = np.full((n_steps, total_racks), IDLE_RACK_KW, dtype=np.float32)
+    Q_total_kw = np.full(n_steps, total_racks * IDLE_RACK_KW, dtype=np.float32)
 
-        # Build per-rack power vector for this timestep
-        p = np.full(total_racks, IDLE_RACK_KW, dtype=np.float32)
+    for k in range(n_steps):
+        idxs = np.where(active[k])[0]
+        if len(idxs) == 0:
+            continue
         taken = 0
-        for j in jobs_sorted:
-            if j.get('start_time', 0.0) <= t_h < j.get('end_time', -1.0) and t_h < 24.0:
-                if taken >= total_racks:
-                    break
-                n_racks = int(min(j.get('num_racks', 0), total_racks - taken))
-                if n_racks > 0:
-                    p[taken:taken + n_racks] = float(j.get('power_kw', 0.0))
-                    taken += n_racks
+        for ji in idxs:
+            if taken >= total_racks:
+                break
+            nr = min(int(j_nracks[ji]), total_racks - taken)
+            if nr > 0:
+                rack_powers_kw[k, taken:taken + nr] = j_powers[ji]
+                taken += nr
+        Q_total_kw[k] = rack_powers_kw[k].sum()
 
-        rack_powers_kw[k, :] = p
-        Q_total_kw[k] = float(np.sum(p))
-
-    # ── Thermal mass ──────────────────────────────────────────────────────────
-    # From static model: THERMAL_CAPACITANCE_MJK = RHO * 4096 * CP / 1e6
-    # Here we use the actual room volume instead of the hardcoded 4096.
-    C_air = RHO * room_volume * CP  # J/K
-
-    # ── Time integration ──────────────────────────────────────────────────────
-    # Static model solves: T_room * (m_Cp + UA_WALLS + UA_FLOOR) = ...
-    # That formula is the steady-state target T_ss.
-    # Here we integrate toward T_ss each timestep using the room's thermal mass.
+    # ── Vectorised thermal integration ────────────────────────────────────────
+    # Effective thermal capacitance includes air, server equipment, and the
+    # shallow layer of concrete slab that participates in short-term transients.
+    C_air = RHO * room_volume * CP
+    C_equipment = total_racks * 500.0 * 500.0          # ~500 kg/rack, ~500 J/(kg·K) mixed metals
+    C_slab = (room_length * room_width) * 0.05 * 2300.0 * 880.0  # top 5 cm of concrete floor
+    C_eff = C_air + C_equipment + C_slab
 
     UA_WALLS = 0.19 * 347
     UA_FLOOR = 0.50 * 640
     T_GROUND = 17.0
 
-    T_room_arr = np.zeros(n_steps, dtype=np.float64)
+    Q_total_w = Q_total_kw.astype(np.float64) * 1000.0
+    frac_to_air = (1.0 - dclc_effectiveness) * (1.0 - rdhx_effectiveness)
+    Q_hx_cap_w = num_heat_exchangers * hx_capacity_kw * 1000.0
+    Q_to_air_w = Q_total_w * frac_to_air
+    Q_remaining_w = np.maximum(Q_to_air_w - Q_hx_cap_w, 0.0)
+
+    if num_air_handlers > 0:
+        total_cfm = num_air_handlers * cfm_per_handler
+        m_dot = (total_cfm / 2119.0) * RHO
+    else:
+        power_density = Q_total_w / room_volume if room_volume > 0 else np.zeros_like(Q_total_w)
+        ach = np.clip(5.0 + power_density / 1000.0, 5.0, 20.0)
+        m_dot = (room_volume * ach / 3600.0) * RHO
+
+    m_Cp = np.asarray(m_dot) * CP
+    denom = m_Cp + UA_WALLS + UA_FLOOR
+    T_ss_arr = (inlet_temp_c * m_Cp + Q_remaining_w
+                + UA_WALLS * T_outdoor_arr + UA_FLOOR * T_GROUND) / denom
+
+    # ODE: T[k+1] = T_ss + (T[k] - T_ss) * exp(-dt/tau)
+    tau = C_eff / denom
+    decay = np.exp(-dt_sim_s / tau)
+
+    T_room_arr = np.empty(n_steps, dtype=np.float64)
     T_room_arr[0] = float(inlet_temp_c)
-
-    T_ss_arr = np.zeros(n_steps, dtype=np.float64)
     for k in range(n_steps - 1):
-        Q_total_w = float(Q_total_kw[k]) * 1000.0
-        T_out_c = float(T_outdoor_arr[k])
+        T_room_arr[k + 1] = T_ss_arr[k] + (T_room_arr[k] - T_ss_arr[k]) * decay[k] \
+            if np.isscalar(decay) is False else \
+            T_ss_arr[k] + (T_room_arr[k] - T_ss_arr[k]) * decay
+    np.clip(T_room_arr, inlet_temp_c - 5.0, inlet_temp_c + 80.0, out=T_room_arr)
 
-        # --- Cooling stages: identical to static model ---
-        Q_dclc_w = Q_total_w * dclc_effectiveness
-        Q_after_dclc_w = Q_total_w - Q_dclc_w
-        Q_rdhx_w = Q_after_dclc_w * rdhx_effectiveness
-        Q_to_air_w = Q_after_dclc_w * (1.0 - rdhx_effectiveness)
-        Q_hx_cap_w = num_heat_exchangers * hx_capacity_kw * 1000.0
-        Q_hx_w = min(Q_to_air_w, Q_hx_cap_w)
-        Q_remaining_w = Q_to_air_w - Q_hx_w
-
-        # --- Airflow: identical to static model ---
-        power_density = Q_total_w / room_volume if room_volume > 0 else 0.0
-        if num_air_handlers > 0:
-            total_cfm = num_air_handlers * cfm_per_handler
-            vol_m3s = total_cfm / 2119.0
-            m_dot = vol_m3s * RHO
-        else:
-            ach = max(5.0, min(20.0, 5.0 + power_density / 1000.0))
-            vol_m3s = (room_volume * ach) / 3600.0
-            m_dot = vol_m3s * RHO
-
-        # --- Steady-state target: identical to static model ---
-        m_Cp = m_dot * CP
-        T_ss = (inlet_temp_c * m_Cp + Q_remaining_w
-                + UA_WALLS * T_out_c + UA_FLOOR * T_GROUND) / (m_Cp + UA_WALLS + UA_FLOOR)
-        T_ss_arr[k] = T_ss
-
-        # --- ODE integration toward T_ss ---
-        # k_eff is the denominator of the static model's T_room formula: m_Cp + UA_WALLS + UA_FLOOR
-        k_eff = m_Cp + UA_WALLS + UA_FLOOR
-        tau = C_air / k_eff if k_eff > 0 else 1e9
-
-        decay = np.exp(-dt_sim_s / tau)
-        T_next = T_ss + (T_room_arr[k] - T_ss) * decay
-        T_room_arr[k + 1] = float(np.clip(T_next, inlet_temp_c - 5.0, inlet_temp_c + 80.0))
-
-    # ── Frame selection for display ───────────────────────────────────────────
+    # ── Frame selection ───────────────────────────────────────────────────────
     frame_stride = max(1, int(dt_vis_s / dt_sim_s))
     frame_indices = np.arange(0, n_steps, frame_stride, dtype=int)
 
@@ -735,12 +729,11 @@ with col1:
     with job_col3:
         gpu_power_level = gpu_power_input(
             label="GPU Power Level",
-            options=["Low (20 kW)", "Medium (50 kW)", "High (60 kW)"],
+            options=list(POWER_LEVELS.keys()),
             default="Medium (50 kW)",
             key="job_gpu",
         )
-        power_map = {"Low (20 kW)": 20.0, "Medium (50 kW)": 50.0, "High (60 kW)": 60.0}
-        job_power_kw = power_map[gpu_power_level]
+        job_power_kw = POWER_LEVELS[gpu_power_level]
 
     total_available_racks = num_rows * racks_per_row
     job_num_racks = rack_count_input(
@@ -793,11 +786,41 @@ with col2:
                   delta_color="inverse",
                   help="June–Sep, Mon–Fri, 2PM–7PM under TOU-HLF-16")
 
-    # Play button (placeholder for now)
-    st.markdown("---")
-    play_button = st.button("▶️ Run Simulation", type="secondary", use_container_width=True,
-                            disabled=len(st.session_state.scheduled_jobs) == 0)
-    if play_button:
+
+# Display scheduled jobs in interactive timeline
+if len(st.session_state.scheduled_jobs) > 0:
+    st.subheader("📋 Scheduled Jobs Timeline")
+
+    sorted_jobs = sorted(st.session_state.scheduled_jobs, key=lambda x: x['start_time'])
+
+    timeline_action = _timeline_component(
+        jobs=sorted_jobs,
+        key=f"job_timeline_v{st.session_state.timeline_version}",
+        default=None,
+    )
+
+    if isinstance(timeline_action, dict):
+        action = timeline_action.get("action")
+        if action == "delete":
+            idx = timeline_action.get("idx")
+            if idx is not None and 0 <= idx < len(sorted_jobs):
+                st.session_state.scheduled_jobs.remove(sorted_jobs[idx])
+                st.session_state.timeline_version += 1
+                st.rerun()
+        elif action == "clear":
+            st.session_state.scheduled_jobs = []
+            st.session_state.timeline_version += 1
+            st.rerun()
+else:
+    st.info("📅 No jobs scheduled yet. Add your first job above to get started!")
+
+# Run Simulation button — below the timeline
+play_button = st.button("▶️ Run Simulation", type="primary", use_container_width=True,
+                        disabled=len(st.session_state.scheduled_jobs) == 0)
+should_run = play_button or st.session_state.auto_run_sim
+if should_run:
+    st.session_state.auto_run_sim = False
+    with st.spinner("Building simulation…"):
         st.session_state.sim_data = build_sim_data(
             st.session_state.scheduled_jobs,
             room_length, room_width, room_height,
@@ -807,161 +830,11 @@ with col2:
             num_air_handlers, cfm_per_handler,
             inlet_temp_c,
         )
-        st.session_state.tou_costs = calculate_tou_cost(st.session_state.sim_data)
-        st.session_state.sim_frame = 0
-        st.session_state.sim_fingerprint = _current_fingerprint
-        st.session_state.sim_stale = False
-        st.session_state.scroll_to_viz = True
-
-# Display scheduled jobs in calendar-style view
-if len(st.session_state.scheduled_jobs) > 0:
-    st.subheader("📋 Scheduled Jobs Timeline")
-
-    # Sort jobs by start time
-    sorted_jobs = sorted(st.session_state.scheduled_jobs, key=lambda x: x['start_time'])
-
-    # Build job blocks HTML
-    job_blocks_html = ""
-    for job_idx, job in enumerate(sorted_jobs):
-        start_pct = (job['start_time'] / 24) * 100
-        duration_pct = min((job['duration'] / 24) * 100, 100 - start_pct)
-
-        # Offset jobs vertically if they overlap
-        top_position = 10 + (job_idx % 2) * 55  # Alternate between two rows
-
-        job_class = "job-low" if "Low" in job['power_level'] else "job-medium" if "Medium" in job[
-            'power_level'] else "job-high"
-        job_emoji = "🟢" if "Low" in job['power_level'] else "🟡" if "Medium" in job['power_level'] else "🔴"
-
-        job_blocks_html += f'<div class="job-block {job_class}" style="left: {start_pct}%; width: {duration_pct}%; top: {top_position}px;">{job_emoji} Job {job_idx + 1}</div>'
-
-    # Build hour labels HTML
-    hour_labels_html = ""
-    for hour in range(24):
-        hour_labels_html += f'<div class="timeline-hour">{hour:02d}</div>'
-
-    # Create complete calendar HTML
-    calendar_html = f"""
-    <style>
-        .calendar-container {{
-            background: linear-gradient(180deg, #2d3436 0%, #34495e 100%);
-            border-radius: 12px;
-            padding: 20px;
-            margin: 10px 0;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }}
-        .timeline-grid {{
-            position: relative;
-            height: 150px;
-            overflow: hidden;
-            background: repeating-linear-gradient(
-                90deg,
-                rgba(255,255,255,0.05) 0px,
-                rgba(255,255,255,0.05) 1px,
-                transparent 1px,
-                transparent calc(100% / 24)
-            );
-            border: 2px solid rgba(255,255,255,0.2);
-            border-radius: 8px;
-            margin: 15px 0;
-        }}
-        .timeline-hours {{
-            display: flex;
-            justify-content: space-between;
-            color: #bdc3c7;
-            font-size: 11px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            padding: 0 5px;
-        }}
-        .timeline-hour {{
-            width: calc(100% / 24);
-            text-align: center;
-        }}
-        .job-block {{
-            position: absolute;
-            height: 50px;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 13px;
-            color: white;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-            border: 2px solid rgba(255,255,255,0.3);
-            transition: transform 0.2s;
-            text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
-        }}
-        .job-block:hover {{
-            transform: scale(1.03);
-            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
-        }}
-        .job-low {{
-            background: linear-gradient(135deg, #00b894 0%, #00cec9 100%);
-        }}
-        .job-medium {{
-            background: linear-gradient(135deg, #fdcb6e 0%, #f39c12 100%);
-        }}
-        .job-high {{
-            background: linear-gradient(135deg, #ff7675 0%, #d63031 100%);
-        }}
-        .job-details {{
-            background: rgba(44, 62, 80, 0.95);
-            border-radius: 8px;
-            padding: 12px 15px;
-            margin: 10px 0;
-            border-left: 4px solid #3498db;
-            color: #ecf0f1;
-            font-size: 14px;
-        }}
-        .job-details strong {{
-            color: #3498db;
-        }}
-    </style>
-    <div class="calendar-container">
-        <div class="timeline-hours">
-            {hour_labels_html}
-        </div>
-        <div class="timeline-grid">
-            {job_blocks_html}
-        </div>
-    </div>
-    """
-
-    st.markdown(calendar_html, unsafe_allow_html=True)
-
-    # Job details list
-    st.markdown("### Job Details")
-    for job_idx, job in enumerate(sorted_jobs):
-        job_emoji = "🟢" if "Low" in job['power_level'] else "🟡" if "Medium" in job['power_level'] else "🔴"
-
-        col1, col2 = st.columns([5, 1])
-
-        with col1:
-            st.markdown(f"""
-            <div class="job-details">
-                <strong>{job_emoji} Job {job_idx + 1}:</strong>
-                {job['start_hour']:02d}:{job['start_min']:02d} → {int(job['end_time']):02d}:{int((job['end_time'] % 1) * 60):02d}
-                ({job['duration']:.1f}h) |
-                {job['power_level']} |
-                {job['num_racks']} racks |
-                {job['num_racks'] * (job['power_kw'] - IDLE_RACK_KW):.0f} kW above idle
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col2:
-            if st.button("🗑️ Remove", key=f"delete_{job_idx}", use_container_width=True):
-                st.session_state.scheduled_jobs.remove(job)
-                st.rerun()
-
-    # Clear all button
-    st.markdown("")
-    if st.button("🗑️ Clear All Jobs", type="secondary", use_container_width=False):
-        st.session_state.scheduled_jobs = []
-        st.rerun()
-else:
-    st.info("📅 No jobs scheduled yet. Add your first job above to get started!")
+    st.session_state.tou_costs = calculate_tou_cost(st.session_state.sim_data)
+    st.session_state.sim_frame = 0
+    st.session_state.sim_fingerprint = _current_fingerprint
+    st.session_state.sim_stale = False
+    st.session_state.scroll_to_viz = True
 
 st.divider()
 
@@ -1095,14 +968,15 @@ def plot_thermal_field(results):
 # Calculate thermal system
 sim = st.session_state.sim_data
 
+selected_T_room_transient = None
 if sim is not None:
     frame_idx = st.session_state.sim_frame
     n_frames = len(sim['frame_indices'])
     step = sim['frame_indices'][frame_idx]
     selected_rack_powers_kw = sim['rack_powers_kw'][step]
     selected_time_of_day = float(sim['times_h'][step])
+    selected_T_room_transient = float(sim['T_room_c'][step])
 else:
-    # Static mode: no simulation run yet, use defaults
     selected_rack_powers_kw = None
     selected_time_of_day = time_of_day
 
@@ -1116,6 +990,7 @@ results = calculate_thermal_system(
     cdu_flow_gpm=cdu_flow_gpm, num_cdus=num_cdus,
     delta_p_kpa=delta_p_kpa, pump_eta=pump_eta, cop=cop,
     rack_powers_kw=selected_rack_powers_kw,
+    T_room_transient=selected_T_room_transient,
 )
 
 # Scroll anchor and auto-scroll on simulation run

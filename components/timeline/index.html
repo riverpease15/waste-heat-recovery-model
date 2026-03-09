@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:transparent;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+
+  .cal{
+    background:linear-gradient(180deg,#2d3436 0%,#34495e 100%);
+    border-radius:12px;padding:16px 20px;
+    box-shadow:0 4px 6px rgba(0,0,0,0.3);
+  }
+  .hours{
+    display:flex;justify-content:space-between;
+    color:#bdc3c7;font-size:11px;font-weight:600;
+    margin-bottom:6px;padding:0 2px;user-select:none;
+  }
+  .hours span{width:calc(100%/24);text-align:center}
+  .grid{
+    position:relative;overflow:hidden;
+    background:repeating-linear-gradient(90deg,
+      rgba(255,255,255,0.05) 0px,rgba(255,255,255,0.05) 1px,
+      transparent 1px,transparent calc(100%/24));
+    border:2px solid rgba(255,255,255,0.2);border-radius:8px;
+  }
+  .jb{
+    position:absolute;border-radius:6px;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:bold;font-size:12px;color:#fff;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4);
+    border:2px solid rgba(255,255,255,0.3);
+    text-shadow:1px 1px 2px rgba(0,0,0,0.5);
+    cursor:pointer;user-select:none;
+    transition:transform 0.15s,box-shadow 0.15s,filter 0.15s;
+  }
+  .jb:hover{transform:scale(1.04);box-shadow:0 4px 14px rgba(0,0,0,0.6)}
+  .jb.selected{
+    outline:3px solid #fff;outline-offset:1px;
+    filter:brightness(1.25);
+    transform:scale(1.06);
+    z-index:999 !important;
+  }
+  .jb.low{background:linear-gradient(135deg,#00b894,#00cec9)}
+  .jb.med{background:linear-gradient(135deg,#fdcb6e,#f39c12)}
+  .jb.high{background:linear-gradient(135deg,#ff7675,#d63031)}
+
+  .info-bar{
+    display:flex;align-items:center;justify-content:space-between;
+    margin-top:10px;min-height:36px;
+  }
+  .info-text{color:#bdc3c7;font-size:13px}
+  .info-text b{color:#ecf0f1}
+  .del-btn{
+    background:linear-gradient(135deg,#e74c3c,#c0392b);
+    color:#fff;border:none;border-radius:6px;
+    padding:7px 18px;font-size:13px;font-weight:600;
+    cursor:pointer;transition:background 0.2s,transform 0.15s;
+    box-shadow:0 2px 6px rgba(0,0,0,0.3);
+  }
+  .del-btn:hover{transform:scale(1.04);filter:brightness(1.1)}
+  .clear-btn{
+    background:transparent;color:#95a5a6;border:1px solid #636e72;
+    border-radius:6px;padding:7px 14px;font-size:12px;font-weight:500;
+    cursor:pointer;transition:color 0.2s,border-color 0.2s;margin-left:8px;
+  }
+  .clear-btn:hover{color:#ecf0f1;border-color:#bdc3c7}
+  .hint{color:#636e72;font-size:12px;font-style:italic}
+</style>
+</head>
+<body>
+<div class="cal" id="cal">
+  <div class="hours" id="hours"></div>
+  <div class="grid" id="grid"></div>
+  <div class="info-bar" id="info-bar">
+    <span class="hint" id="hint">Click a job to select it</span>
+  </div>
+</div>
+
+<script>
+(function(){
+  /* ── Streamlit component protocol ────────────────────────────────── */
+  function send(type, payload) {
+    window.parent.postMessage({ isStreamlitMessage: true, type: type, ...payload }, '*');
+  }
+  function setFrameHeight() {
+    send('streamlit:setFrameHeight', { height: document.body.scrollHeight + 10 });
+  }
+  function setComponentValue(val) {
+    send('streamlit:setComponentValue', { value: val });
+  }
+
+  var JOBS = [];
+  var selectedIdx = null;
+
+  window.addEventListener('message', function(e) {
+    if (!e.data || e.data.type !== 'streamlit:render') return;
+    var args = e.data.args || {};
+    JOBS = args.jobs || [];
+    render(JOBS);
+  });
+
+  send('streamlit:componentReady', { apiVersion: 1 });
+
+  function render(jobs) {
+    var hEl = document.getElementById('hours');
+    hEl.innerHTML = '';
+    for (var h = 0; h < 24; h++) {
+      var s = document.createElement('span');
+      s.textContent = String(h).padStart(2, '0');
+      hEl.appendChild(s);
+    }
+
+    var rows = [];
+    var sorted = jobs.slice().sort(function(a, b) { return a.start_time - b.start_time; });
+    var jobRow = {};
+    sorted.forEach(function(j) {
+      var placed = false;
+      for (var r = 0; r < rows.length; r++) {
+        var ok = true;
+        for (var ri = 0; ri < rows[r].length; ri++) {
+          var rj = rows[r][ri];
+          if (!(j.start_time >= rj.end_time || j.end_time <= rj.start_time)) { ok = false; break; }
+        }
+        if (ok) { rows[r].push(j); jobRow[j.id] = r; placed = true; break; }
+      }
+      if (!placed) { jobRow[j.id] = rows.length; rows.push([j]); }
+    });
+
+    var rowH = 38, gap = 4, maxRows = Math.min(rows.length, 20);
+    var gridH = maxRows * (rowH + gap) + 10;
+    var grid = document.getElementById('grid');
+    grid.style.height = gridH + 'px';
+    grid.innerHTML = '';
+
+    jobs.forEach(function(j, idx) {
+      var r = jobRow[j.id];
+      if (r === undefined || r >= maxRows) return;
+      var left = (j.start_time / 24) * 100;
+      var w = Math.max(0.4, (j.duration / 24) * 100);
+      var top = r * (rowH + gap) + 4;
+      var cls = 'jb';
+      if (j.power_level.indexOf('Low') >= 0) cls += ' low';
+      else if (j.power_level.indexOf('Medium') >= 0) cls += ' med';
+      else cls += ' high';
+      if (idx === selectedIdx) cls += ' selected';
+
+      var dot = j.power_level.indexOf('Low') >= 0 ? '\u{1F7E2}'
+              : j.power_level.indexOf('Medium') >= 0 ? '\u{1F7E1}' : '\u{1F534}';
+      var el = document.createElement('div');
+      el.className = cls;
+      el.style.cssText = 'left:' + left + '%;width:' + w + '%;top:' + top + 'px;height:' + rowH + 'px;z-index:' + (idx === selectedIdx ? 999 : r);
+      el.title = j.power_level + ' | '
+        + String(j.start_hour).padStart(2, '0') + ':' + String(j.start_min).padStart(2, '0')
+        + '\u2013' + String(Math.floor(j.end_time)).padStart(2, '0') + ':' + String(Math.round((j.end_time % 1) * 60)).padStart(2, '0')
+        + ' | ' + j.num_racks + 'R';
+      el.textContent = dot;
+      el.dataset.idx = idx;
+      el.addEventListener('click', function() { onSelect(parseInt(this.dataset.idx)); });
+      grid.appendChild(el);
+    });
+
+    updateInfoBar();
+    setTimeout(setFrameHeight, 30);
+  }
+
+  function onSelect(idx) {
+    if (selectedIdx === idx) { selectedIdx = null; } else { selectedIdx = idx; }
+    render(JOBS);
+    setComponentValue(selectedIdx !== null ? { action: 'select', idx: selectedIdx } : null);
+  }
+
+  window._tlDelete = function() {
+    if (selectedIdx === null) return;
+    var idx = selectedIdx;
+    selectedIdx = null;
+    setComponentValue({ action: 'delete', idx: idx });
+  };
+
+  window._tlClear = function() {
+    selectedIdx = null;
+    setComponentValue({ action: 'clear' });
+  };
+
+  function updateInfoBar() {
+    var bar = document.getElementById('info-bar');
+    if (selectedIdx === null || selectedIdx >= JOBS.length) {
+      bar.innerHTML = '<span class="hint">Click a job to select it</span>'
+        + '<button class="clear-btn" onclick="_tlClear()">Clear All</button>';
+      return;
+    }
+    var j = JOBS[selectedIdx];
+    var dot = j.power_level.indexOf('Low') >= 0 ? '\u{1F7E2}'
+            : j.power_level.indexOf('Medium') >= 0 ? '\u{1F7E1}' : '\u{1F534}';
+    var tStart = String(j.start_hour).padStart(2, '0') + ':' + String(j.start_min).padStart(2, '0');
+    var eH = Math.floor(j.end_time), eM = Math.round((j.end_time % 1) * 60);
+    var tEnd = String(eH).padStart(2, '0') + ':' + String(eM).padStart(2, '0');
+    bar.innerHTML = '<span class="info-text">' + dot + ' <b>' + j.power_level + '</b> &nbsp; '
+      + tStart + '\u2013' + tEnd + ' &nbsp; ' + j.num_racks + ' rack' + (j.num_racks > 1 ? 's' : '') + '</span>'
+      + '<span><button class="del-btn" onclick="_tlDelete()">\u{1F5D1}\uFE0F Delete Job</button>'
+      + '<button class="clear-btn" onclick="_tlClear()">Clear All</button></span>';
+  }
+})();
+</script>
+</body>
+</html>
