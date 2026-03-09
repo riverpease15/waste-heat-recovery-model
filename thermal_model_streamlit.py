@@ -262,15 +262,16 @@ def calculate_thermal_system(room_length, room_width, room_height,
 
     # === RACK LAYOUT ===
     RACK_WIDTH = 0.6
-    RACK_DEPTH = 1.0
+    RACK_DEPTH = 1.4
     CLEARANCE = 1.5
     AISLE_WIDTH = 1.0
 
     RACKS = []
     available_length = room_length - 2 * CLEARANCE
+    Y_CLEARANCE = 4.0
 
     for row_idx in range(num_rows):
-        y_pos = CLEARANCE + RACK_DEPTH / 2 + row_idx * (RACK_DEPTH + AISLE_WIDTH)
+        y_pos = Y_CLEARANCE + RACK_DEPTH / 2 + row_idx * (RACK_DEPTH + AISLE_WIDTH)
         total_row_width = racks_per_row * RACK_WIDTH
         start_x = CLEARANCE + (available_length - total_row_width) / 2
 
@@ -455,20 +456,20 @@ def calculate_thermal_system(room_length, room_width, room_height,
     # === EQUIPMENT POSITIONS ===
     AIR_HANDLERS = []
     if num_air_handlers >= 1:
-        AIR_HANDLERS.append({'x': 0.7, 'y': room_width / 2, 'width': 1.0, 'height': 2.0, 'side': 'left'})
+        AIR_HANDLERS.append({'x': 1.0, 'y': room_width / 2, 'width': 1.7, 'height': 4.5, 'side': 'left'})
     if num_air_handlers >= 2:
-        AIR_HANDLERS.append({'x': room_length - 0.7, 'y': room_width / 2, 'width': 1.0, 'height': 2.0, 'side': 'right'})
+        AIR_HANDLERS.append({'x': room_length - 1.0, 'y': room_width / 2, 'width': 1.7, 'height': 4.5, 'side': 'right'})
     if num_air_handlers >= 3:
-        AIR_HANDLERS.append({'x': room_length / 2, 'y': 0.7, 'width': 2.0, 'height': 1.0, 'side': 'top'})
+        AIR_HANDLERS.append({'x': room_length / 2, 'y': 1.2, 'width': 4.5, 'height': 2.0, 'side': 'top'})
     if num_air_handlers >= 4:
         AIR_HANDLERS.append(
-            {'x': room_length / 2, 'y': room_width - 0.7, 'width': 2.0, 'height': 1.0, 'side': 'bottom'})
+            {'x': room_length / 2, 'y': room_width - 1.2, 'width': 4.5, 'height': 2.0, 'side': 'bottom'})
 
     HX_POSITIONS = []
     if num_heat_exchangers >= 1:
-        HX_POSITIONS.append({'x': room_length * 0.25, 'y': 0.7, 'width': 1.2, 'height': 0.6})
+        HX_POSITIONS.append({'x': room_length * 0.25, 'y': room_width - 1.0, 'width': 2.0, 'height': 1.2})
     if num_heat_exchangers >= 2:
-        HX_POSITIONS.append({'x': room_length * 0.75, 'y': 0.7, 'width': 1.2, 'height': 0.6})
+        HX_POSITIONS.append({'x': room_length * 0.75, 'y': room_width - 1.0, 'width': 2.0, 'height': 1.2})
 
     # === TEMPERATURE FIELD VISUALIZATION ===
     # Create physics-based temperature distribution
@@ -999,8 +1000,8 @@ def plot_thermal_field(results):
         ax1.add_patch(rect)
 
         # RDHX indicator (blue strip)
-        rdhx = Rectangle((rack['x'] - rack['width'] / 2, rack['y'] + rack['depth'] / 2 - 0.05),
-                         rack['width'], 0.05,
+        rdhx = Rectangle((rack['x'] - rack['width'] / 2, rack['y'] + rack['depth'] / 2 - 0.1),
+                         rack['width'], 0.1,
                          facecolor='royalblue', alpha=0.95)
         ax1.add_patch(rdhx)
 
@@ -1018,9 +1019,10 @@ def plot_thermal_field(results):
                          linewidth=2, alpha=0.9, hatch='///')
         ax1.add_patch(rect)
 
+        rotation = 90 if handler['side'] in ('left', 'right') else 0
         ax1.text(handler['x'], handler['y'], 'AIR\nHANDLER',
-                 ha='center', va='center', fontsize=7,
-                 color='white', fontweight='bold')
+                 ha='center', va='center', fontsize=10,
+                 color='white', fontweight='bold', rotation=rotation)
 
         # Airflow arrows
         if handler['side'] == 'left':
@@ -1041,7 +1043,7 @@ def plot_thermal_field(results):
         ax1.add_patch(rect)
 
         ax1.text(hx['x'], hx['y'], 'HEAT\nEXCH',
-                 ha='center', va='center', fontsize=6,
+                 ha='center', va='center', fontsize=9,
                  color='white', fontweight='bold')
 
     ax1.set_xlabel('Room Length (m)', fontsize=10)
@@ -1449,7 +1451,7 @@ st.caption("**ATL01 PACE Room Thermal Model** — Hover over info icons for expl
 if st.session_state.sim_playing and st.session_state.sim_data is not None:
     n_frames = len(st.session_state.sim_data['frame_indices'])
     if st.session_state.sim_frame < n_frames - 1:
-        time.sleep(0.05)  # minimal delay — Streamlit rerun overhead paces the animation
+        time.sleep(0.05)  # minimal delay for smoothness
         st.session_state.sim_frame += 1
         st.rerun()
     else:
