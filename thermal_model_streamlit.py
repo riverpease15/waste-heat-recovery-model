@@ -979,7 +979,7 @@ def plot_thermal_field(results):
     im1 = ax1.contourf(results['X'], results['Y'], T_f,
                        levels=30, cmap='RdYlBu_r',
                        vmin=T_inlet_f, vmax=waste_threshold_f)
-    plt.colorbar(im1, ax=ax1, label='Temperature (°F)', shrink=0.85)
+    fig.colorbar(im1, ax=ax1, label='Temperature (°F)', shrink=0.85)
 
     # Contour lines (°F)
     levels_f = np.linspace(T_inlet_f, waste_threshold_f, 5)
@@ -1065,7 +1065,7 @@ def plot_thermal_field(results):
 
     im2 = ax2.contourf(results['X'], results['Y'], hot_zones_f,
                        levels=10, cmap='hot', vmin=0, vmax=9)
-    plt.colorbar(im2, ax=ax2, label='°F above threshold', shrink=0.85)
+    fig.colorbar(im2, ax=ax2, label='°F above threshold', shrink=0.85)
 
     if results['hot_spots'] > 0:
         ax2.contour(results['X'], results['Y'], T_f,
@@ -1449,7 +1449,7 @@ st.caption("**ATL01 PACE Room Thermal Model** — Hover over info icons for expl
 if st.session_state.sim_playing and st.session_state.sim_data is not None:
     n_frames = len(st.session_state.sim_data['frame_indices'])
     if st.session_state.sim_frame < n_frames - 1:
-        time.sleep(0.45)  # control how fast frames get rendered
+        time.sleep(0.05)  # minimal delay — Streamlit rerun overhead paces the animation
         st.session_state.sim_frame += 1
         st.rerun()
     else:
