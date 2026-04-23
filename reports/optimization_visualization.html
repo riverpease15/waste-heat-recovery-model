@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Optimization Plots</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f8fafc;
+      color: #111827;
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .card {
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 16px;
+    }
+    h1, h2 {
+      margin: 0 0 8px;
+    }
+    p {
+      margin: 4px 0 10px;
+      color: #4b5563;
+    }
+    canvas {
+      width: 100%;
+      height: auto;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .legend {
+      margin-top: 8px;
+      font-size: 0.9rem;
+      color: #4b5563;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Data Center Optimization: Paper Plots</h1>
+    <p>Two simple plots for screenshot/export into the paper.</p>
+
+    <div class="card">
+      <h2>Plot 1: Optimized vs Default (Normalized Comparison)</h2>
+      <p>Each pair is scaled to its own max value so differences are easy to see.</p>
+      <canvas id="barPlot" width="1000" height="430"></canvas>
+      <div class="legend">Blue: Optimized | Gray: Default</div>
+    </div>
+  </div>
+
+  <script>
+    const defaults = {
+      num_air_handlers: 2,
+      cfm_per_handler: 155000,
+      dclc_effectiveness: 0.35,
+      rdhx_effectiveness: 0.92,
+      num_cdus: 3,
+      cdu_flow_gpm: 150,
+      cop: 4.0,
+      wall_u: 0.19,
+      floor_u: 0.50
+    };
+
+    const optimized = {
+      num_air_handlers: 1,
+      cfm_per_handler: 76134.6873,
+      dclc_effectiveness: 0.1034,
+      rdhx_effectiveness: 0.7945,
+      num_cdus: 4,
+      cdu_flow_gpm: 130.9601,
+      cop: 5.5823,
+      wall_u: 0.2962,
+      floor_u: 0.4629
+    };
+
+    function drawBarPlot() {
+      const canvas = document.getElementById("barPlot");
+      const ctx = canvas.getContext("2d");
+      const W = canvas.width;
+      const H = canvas.height;
+      const margin = {top: 30, right: 20, bottom: 110, left: 60};
+      const plotW = W - margin.left - margin.right;
+      const plotH = H - margin.top - margin.bottom;
+
+      const fields = [
+        ["Air handlers", "num_air_handlers"],
+        ["CFM/handler", "cfm_per_handler"],
+        ["DCLC eff.", "dclc_effectiveness"],
+        ["RDHX eff.", "rdhx_effectiveness"],
+        ["CDUs", "num_cdus"],
+        ["CDU flow", "cdu_flow_gpm"],
+        ["COP", "cop"],
+        ["Wall U", "wall_u"],
+        ["Floor U", "floor_u"]
+      ];
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.strokeStyle = "#d1d5db";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(margin.left, margin.top);
+      ctx.lineTo(margin.left, margin.top + plotH);
+      ctx.lineTo(margin.left + plotW, margin.top + plotH);
+      ctx.stroke();
+
+      for (let g = 0; g <= 5; g++) {
+        const y = margin.top + plotH - (g / 5) * plotH;
+        ctx.strokeStyle = "#eef2f7";
+        ctx.beginPath();
+        ctx.moveTo(margin.left, y);
+        ctx.lineTo(margin.left + plotW, y);
+        ctx.stroke();
+      }
+
+      const n = fields.length;
+      const groupW = plotW / n;
+      const barW = groupW * 0.28;
+
+      fields.forEach(([label, key], i) => {
+        const ov = optimized[key];
+        const dv = defaults[key];
+        const maxv = Math.max(ov, dv, 1e-9);
+        const on = ov / maxv;
+        const dn = dv / maxv;
+
+        const x0 = margin.left + i * groupW + (groupW - (barW * 2 + 6)) / 2;
+        const ox = x0;
+        const dx = x0 + barW + 6;
+        const oy = margin.top + plotH - on * plotH;
+        const dy = margin.top + plotH - dn * plotH;
+
+        ctx.fillStyle = "#2563eb";
+        ctx.fillRect(ox, oy, barW, on * plotH);
+        ctx.fillStyle = "#9ca3af";
+        ctx.fillRect(dx, dy, barW, dn * plotH);
+
+        ctx.save();
+        ctx.translate(margin.left + i * groupW + groupW / 2, margin.top + plotH + 8);
+        ctx.rotate(-Math.PI / 4);
+        ctx.fillStyle = "#374151";
+        ctx.font = "12px Arial";
+        ctx.textAlign = "left";
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+      });
+
+      ctx.fillStyle = "#374151";
+      ctx.font = "12px Arial";
+      ctx.textAlign = "right";
+      ctx.fillText("1.0", margin.left - 8, margin.top + 4);
+      ctx.fillText("0.5", margin.left - 8, margin.top + plotH / 2 + 4);
+      ctx.fillText("0.0", margin.left - 8, margin.top + plotH + 4);
+    }
+
+    drawBarPlot();
+  </script>
+</body>
+</html>
