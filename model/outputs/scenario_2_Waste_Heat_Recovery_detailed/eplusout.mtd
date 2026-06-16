@@ -1,0 +1,304 @@
+
+ Meters for 7,WASTE_HEAT_RECOVERY_HEATING_COIL:Heating Coil Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:HVAC [J]
+  OnMeter=HeatingCoils:EnergyTransfer [J]
+
+ Meters for 44,WASTE_HEAT_RECOVERY_HEATING_COIL:Heating Coil Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:HVAC [J]
+  OnMeter=Heating:Electricity [J]
+  OnMeter=General:Heating:Electricity [J]
+
+ Meters for 93,WASTE_HEAT_RECOVERY_SERVERS:ITE CPU Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=ITE-CPU:InteriorEquipment:Electricity [J]
+  OnMeter=ITE-CPU:InteriorEquipment:Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=ITE-CPU:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 202,WASTE_HEAT_RECOVERY_SERVERS:ITE Fan Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=ITE-Fans:InteriorEquipment:Electricity [J]
+  OnMeter=ITE-Fans:InteriorEquipment:Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=ITE-Fans:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 239,WASTE_HEAT_RECOVERY_SERVERS:ITE UPS Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:Building [J]
+  OnMeter=Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=Electricity:SpaceType:GENERAL [J]
+  OnMeter=InteriorEquipment:Electricity [J]
+  OnMeter=InteriorEquipment:Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+  OnMeter=ITE-UPS:InteriorEquipment:Electricity [J]
+  OnMeter=ITE-UPS:InteriorEquipment:Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=ITE-UPS:InteriorEquipment:Electricity:SpaceType:GENERAL [J]
+
+ Meters for 281,WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Heating Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=Heating:EnergyTransfer [J]
+  OnMeter=Heating:EnergyTransfer:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=General:Heating:EnergyTransfer [J]
+  OnMeter=General:Heating:EnergyTransfer:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+
+ Meters for 354,WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:Building [J]
+  OnMeter=EnergyTransfer:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=Cooling:EnergyTransfer [J]
+  OnMeter=Cooling:EnergyTransfer:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+  OnMeter=General:Cooling:EnergyTransfer [J]
+  OnMeter=General:Cooling:EnergyTransfer:Zone:WASTE_HEAT_RECOVERY_ZONE [J]
+
+ Meters for 405,Whole Building:Facility Total Purchased Electricity Energy [J]
+  OnMeter=ElectricityPurchased:Facility [J]
+  OnMeter=ElectricityPurchased:Plant [J]
+  OnMeter=Cogeneration:ElectricityPurchased [J]
+  OnMeter=General:Cogeneration:ElectricityPurchased [J]
+
+ Meters for 454,Whole Building:Facility Total Surplus Electricity Energy [J]
+  OnMeter=ElectricitySurplusSold:Facility [J]
+  OnMeter=ElectricitySurplusSold:Plant [J]
+  OnMeter=Cogeneration:ElectricitySurplusSold [J]
+  OnMeter=General:Cogeneration:ElectricitySurplusSold [J]
+
+ Meters for 503,Whole Building:Facility Net Purchased Electricity Energy [J]
+  OnMeter=ElectricityNet:Facility [J]
+  OnMeter=ElectricityNet:Plant [J]
+  OnMeter=Cogeneration:ElectricityNet [J]
+  OnMeter=General:Cogeneration:ElectricityNet [J]
+
+ Meters for 553,WASTE_HEAT_RECOVERY_SUPPLY_FAN:Fan Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:HVAC [J]
+  OnMeter=Fans:Electricity [J]
+  OnMeter=General:Fans:Electricity [J]
+
+ Meters for 579,WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Total Cooling Energy [J]
+  OnMeter=EnergyTransfer:Facility [J]
+  OnMeter=EnergyTransfer:HVAC [J]
+  OnMeter=CoolingCoils:EnergyTransfer [J]
+
+ Meters for 592,WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:HVAC [J]
+  OnMeter=Cooling:Electricity [J]
+  OnMeter=General:Cooling:Electricity [J]
+
+ Meters for 617,WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Crankcase Heater Electricity Energy [J]
+  OnMeter=Electricity:Facility [J]
+  OnMeter=Electricity:HVAC [J]
+  OnMeter=Cooling:Electricity [J]
+  OnMeter=General:Cooling:Electricity [J]
+
+ Meters for 628,Site:Environmental Impact Total N2O Emissions Carbon Equivalent Mass [kg]
+  OnMeter=Carbon Equivalent:Facility [kg]
+  OnMeter=CarbonEquivalentEmissions:Carbon Equivalent [kg]
+
+ Meters for 653,Site:Environmental Impact Total CH4 Emissions Carbon Equivalent Mass [kg]
+  OnMeter=Carbon Equivalent:Facility [kg]
+  OnMeter=CarbonEquivalentEmissions:Carbon Equivalent [kg]
+
+ Meters for 654,Site:Environmental Impact Total CO2 Emissions Carbon Equivalent Mass [kg]
+  OnMeter=Carbon Equivalent:Facility [kg]
+  OnMeter=CarbonEquivalentEmissions:Carbon Equivalent [kg]
+
+ For Meter=EnergyTransfer:Facility [J], ResourceType=EnergyTransfer, contents are:
+  WASTE_HEAT_RECOVERY_HEATING_COIL:Heating Coil Heating Energy
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Heating Energy
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Cooling Energy
+  WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Total Cooling Energy
+
+ For Meter=EnergyTransfer:HVAC [J], ResourceType=EnergyTransfer, Group=HVAC, contents are:
+  WASTE_HEAT_RECOVERY_HEATING_COIL:Heating Coil Heating Energy
+  WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Total Cooling Energy
+
+ For Meter=HeatingCoils:EnergyTransfer [J], ResourceType=EnergyTransfer, EndUse=HeatingCoils, contents are:
+  WASTE_HEAT_RECOVERY_HEATING_COIL:Heating Coil Heating Energy
+
+ For Meter=Electricity:Facility [J], ResourceType=Electricity, contents are:
+  WASTE_HEAT_RECOVERY_HEATING_COIL:Heating Coil Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE CPU Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE Fan Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE UPS Electricity Energy
+  WASTE_HEAT_RECOVERY_SUPPLY_FAN:Fan Electricity Energy
+  WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Electricity Energy
+  WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Crankcase Heater Electricity Energy
+
+ For Meter=Electricity:HVAC [J], ResourceType=Electricity, Group=HVAC, contents are:
+  WASTE_HEAT_RECOVERY_HEATING_COIL:Heating Coil Electricity Energy
+  WASTE_HEAT_RECOVERY_SUPPLY_FAN:Fan Electricity Energy
+  WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Electricity Energy
+  WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Crankcase Heater Electricity Energy
+
+ For Meter=Heating:Electricity [J], ResourceType=Electricity, EndUse=Heating, contents are:
+  WASTE_HEAT_RECOVERY_HEATING_COIL:Heating Coil Electricity Energy
+
+ For Meter=General:Heating:Electricity [J], ResourceType=Electricity, EndUse=Heating, contents are:
+  WASTE_HEAT_RECOVERY_HEATING_COIL:Heating Coil Electricity Energy
+
+ For Meter=Electricity:Building [J], ResourceType=Electricity, Group=Building, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE CPU Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE Fan Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE UPS Electricity Energy
+
+ For Meter=Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J], ResourceType=Electricity, Group=Zone, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE CPU Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE Fan Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE UPS Electricity Energy
+
+ For Meter=Electricity:SpaceType:GENERAL [J], ResourceType=Electricity, Group=SpaceType, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE CPU Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE Fan Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE UPS Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity [J], ResourceType=Electricity, EndUse=InteriorEquipment, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE CPU Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE Fan Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE UPS Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE CPU Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE Fan Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE UPS Electricity Energy
+
+ For Meter=InteriorEquipment:Electricity:SpaceType:GENERAL [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=SpaceType, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE CPU Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE Fan Electricity Energy
+  WASTE_HEAT_RECOVERY_SERVERS:ITE UPS Electricity Energy
+
+ For Meter=ITE-CPU:InteriorEquipment:Electricity [J], ResourceType=Electricity, EndUse=InteriorEquipment, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE CPU Electricity Energy
+
+ For Meter=ITE-CPU:InteriorEquipment:Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE CPU Electricity Energy
+
+ For Meter=ITE-CPU:InteriorEquipment:Electricity:SpaceType:GENERAL [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=SpaceType, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE CPU Electricity Energy
+
+ For Meter=ITE-Fans:InteriorEquipment:Electricity [J], ResourceType=Electricity, EndUse=InteriorEquipment, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE Fan Electricity Energy
+
+ For Meter=ITE-Fans:InteriorEquipment:Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE Fan Electricity Energy
+
+ For Meter=ITE-Fans:InteriorEquipment:Electricity:SpaceType:GENERAL [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=SpaceType, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE Fan Electricity Energy
+
+ For Meter=ITE-UPS:InteriorEquipment:Electricity [J], ResourceType=Electricity, EndUse=InteriorEquipment, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE UPS Electricity Energy
+
+ For Meter=ITE-UPS:InteriorEquipment:Electricity:Zone:WASTE_HEAT_RECOVERY_ZONE [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=Zone, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE UPS Electricity Energy
+
+ For Meter=ITE-UPS:InteriorEquipment:Electricity:SpaceType:GENERAL [J], ResourceType=Electricity, EndUse=InteriorEquipment, Group=SpaceType, contents are:
+  WASTE_HEAT_RECOVERY_SERVERS:ITE UPS Electricity Energy
+
+ For Meter=EnergyTransfer:Building [J], ResourceType=EnergyTransfer, Group=Building, contents are:
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Heating Energy
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Cooling Energy
+
+ For Meter=EnergyTransfer:Zone:WASTE_HEAT_RECOVERY_ZONE [J], ResourceType=EnergyTransfer, Group=Zone, contents are:
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Heating Energy
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Cooling Energy
+
+ For Meter=Heating:EnergyTransfer [J], ResourceType=EnergyTransfer, EndUse=Heating, contents are:
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Heating Energy
+
+ For Meter=Heating:EnergyTransfer:Zone:WASTE_HEAT_RECOVERY_ZONE [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer [J], ResourceType=EnergyTransfer, EndUse=Heating, contents are:
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Heating Energy
+
+ For Meter=General:Heating:EnergyTransfer:Zone:WASTE_HEAT_RECOVERY_ZONE [J], ResourceType=EnergyTransfer, EndUse=Heating, Group=Zone, contents are:
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Heating Energy
+
+ For Meter=Cooling:EnergyTransfer [J], ResourceType=EnergyTransfer, EndUse=Cooling, contents are:
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Cooling Energy
+
+ For Meter=Cooling:EnergyTransfer:Zone:WASTE_HEAT_RECOVERY_ZONE [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer [J], ResourceType=EnergyTransfer, EndUse=Cooling, contents are:
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Cooling Energy
+
+ For Meter=General:Cooling:EnergyTransfer:Zone:WASTE_HEAT_RECOVERY_ZONE [J], ResourceType=EnergyTransfer, EndUse=Cooling, Group=Zone, contents are:
+  WASTE_HEAT_RECOVERY_ZONE:Zone Air System Sensible Cooling Energy
+
+ For Meter=ElectricityPurchased:Facility [J], ResourceType=ElectricityPurchased, contents are:
+  Whole Building:Facility Total Purchased Electricity Energy
+
+ For Meter=ElectricityPurchased:Plant [J], ResourceType=ElectricityPurchased, Group=Plant, contents are:
+  Whole Building:Facility Total Purchased Electricity Energy
+
+ For Meter=Cogeneration:ElectricityPurchased [J], ResourceType=ElectricityPurchased, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Total Purchased Electricity Energy
+
+ For Meter=General:Cogeneration:ElectricityPurchased [J], ResourceType=ElectricityPurchased, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Total Purchased Electricity Energy
+
+ For Meter=ElectricitySurplusSold:Facility [J], ResourceType=ElectricitySurplusSold, contents are:
+  Whole Building:Facility Total Surplus Electricity Energy
+
+ For Meter=ElectricitySurplusSold:Plant [J], ResourceType=ElectricitySurplusSold, Group=Plant, contents are:
+  Whole Building:Facility Total Surplus Electricity Energy
+
+ For Meter=Cogeneration:ElectricitySurplusSold [J], ResourceType=ElectricitySurplusSold, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Total Surplus Electricity Energy
+
+ For Meter=General:Cogeneration:ElectricitySurplusSold [J], ResourceType=ElectricitySurplusSold, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Total Surplus Electricity Energy
+
+ For Meter=ElectricityNet:Facility [J], ResourceType=ElectricityNet, contents are:
+  Whole Building:Facility Net Purchased Electricity Energy
+
+ For Meter=ElectricityNet:Plant [J], ResourceType=ElectricityNet, Group=Plant, contents are:
+  Whole Building:Facility Net Purchased Electricity Energy
+
+ For Meter=Cogeneration:ElectricityNet [J], ResourceType=ElectricityNet, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Net Purchased Electricity Energy
+
+ For Meter=General:Cogeneration:ElectricityNet [J], ResourceType=ElectricityNet, EndUse=Cogeneration, contents are:
+  Whole Building:Facility Net Purchased Electricity Energy
+
+ For Meter=Fans:Electricity [J], ResourceType=Electricity, EndUse=Fans, contents are:
+  WASTE_HEAT_RECOVERY_SUPPLY_FAN:Fan Electricity Energy
+
+ For Meter=General:Fans:Electricity [J], ResourceType=Electricity, EndUse=Fans, contents are:
+  WASTE_HEAT_RECOVERY_SUPPLY_FAN:Fan Electricity Energy
+
+ For Meter=CoolingCoils:EnergyTransfer [J], ResourceType=EnergyTransfer, EndUse=CoolingCoils, contents are:
+  WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Total Cooling Energy
+
+ For Meter=Cooling:Electricity [J], ResourceType=Electricity, EndUse=Cooling, contents are:
+  WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Electricity Energy
+  WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Crankcase Heater Electricity Energy
+
+ For Meter=General:Cooling:Electricity [J], ResourceType=Electricity, EndUse=Cooling, contents are:
+  WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Electricity Energy
+  WASTE_HEAT_RECOVERY_DX_COIL:Cooling Coil Crankcase Heater Electricity Energy
+
+ For Meter=Carbon Equivalent:Facility [kg], ResourceType=Carbon Equivalent, contents are:
+  Site:Environmental Impact Total N2O Emissions Carbon Equivalent Mass
+  Site:Environmental Impact Total CH4 Emissions Carbon Equivalent Mass
+  Site:Environmental Impact Total CO2 Emissions Carbon Equivalent Mass
+
+ For Meter=CarbonEquivalentEmissions:Carbon Equivalent [kg], ResourceType=Carbon Equivalent, EndUse=CarbonEquivalentEmissions, contents are:
+  Site:Environmental Impact Total N2O Emissions Carbon Equivalent Mass
+  Site:Environmental Impact Total CH4 Emissions Carbon Equivalent Mass
+  Site:Environmental Impact Total CO2 Emissions Carbon Equivalent Mass

@@ -1,0 +1,20 @@
+Program Version,EnergyPlus, Version 25.1.0-68a4a7c774, YMD=2026.06.16 10:52,
+   ************* Beginning Zone Sizing Calculations
+   ************* Note: You have encountered a corner case in the EnergyPlus Curve:* evaluation code.
+   ************* The code was refactored for version 23.1, but there were a few corner cases that could not be found automatically
+   ************* If you are able, please provide your input file to the EnergyPlus helpdesk or repository so a developer can patch for your use case
+   ************* Your simulation continues as normal, thanks!
+   ** Warning ** Calculated design heating load for zone=HIGH_DENSITY_UPGRADE_ZONE is zero.
+   **   ~~~   ** Check Sizing:Zone and ZoneControl:Thermostat inputs.
+   ************* Testing Individual Branch Integrity
+   ************* All Branches passed integrity testing
+   ************* Testing Individual Supply Air Path Integrity
+   ************* All Supply Air Paths passed integrity testing
+   ************* Testing Individual Return Air Path Integrity
+   ************* All Return Air Paths passed integrity testing
+   ************* No node connection errors were found.
+   ************* Beginning Simulation
+   ************* Simulation Error Summary *************
+   ************* EnergyPlus Warmup Error Summary. During Warmup: 0 Warning; 0 Severe Errors.
+   ************* EnergyPlus Sizing Error Summary. During Sizing: 1 Warning; 0 Severe Errors.
+   ************* EnergyPlus Completed Successfully-- 1 Warning; 0 Severe Errors; Elapsed Time=00hr 00min  0.07sec
