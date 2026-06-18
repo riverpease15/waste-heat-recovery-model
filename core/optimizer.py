@@ -105,8 +105,8 @@ def optimize_schedule(
         best_score = float("inf")
         best_start = -1
 
-        for s in range(n_slots - dur + 1):
-            span = slice(s, s + dur)
+        for s in range(n_slots):
+            span = np.arange(s, s + dur) % n_slots
             if np.any(rack_used[span] + racks > total_racks):
                 continue
 
@@ -125,7 +125,7 @@ def optimize_schedule(
             unscheduled_count += 1
             continue
 
-        span = slice(best_start, best_start + dur)
+        span = np.arange(best_start, best_start + dur) % n_slots
         rack_used[span] += racks
         load_kw[span] += pw * racks
         tier_load[pw][span] += pw * racks

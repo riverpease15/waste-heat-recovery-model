@@ -137,12 +137,14 @@ class SimplifiedIDFGenerator:
         zone.Ceiling_Height = room['height']
         zone.Volume = room['length'] * room['width'] * room['height']
         
+        self._add_constructions(idf, scenario)
+        
         floor = idf.newidfobject('BUILDINGSURFACE:DETAILED')
         floor.Name = f'{name}_Floor'
         floor.Surface_Type = 'Floor'
-        floor.Construction_Name = 'Adiabatic_Construction'
+        floor.Construction_Name = 'Floor_Construction'
         floor.Zone_Name = zone.Name
-        floor.Outside_Boundary_Condition = 'Adiabatic'
+        floor.Outside_Boundary_Condition = 'Ground'
         floor.Sun_Exposure = 'NoSun'
         floor.Wind_Exposure = 'NoWind'
         floor.View_Factor_to_Ground = 0
@@ -198,17 +200,65 @@ class SimplifiedIDFGenerator:
             wall = idf.newidfobject('BUILDINGSURFACE:DETAILED')
             wall.Name = f'{name}_Wall_{wall_name}'
             wall.Surface_Type = 'Wall'
-            wall.Construction_Name = 'Adiabatic_Construction'
+            if wall_name in ['North', 'South']:
+                wall.Construction_Name = 'Wall_Construction'
+                wall.Outside_Boundary_Condition = 'Outdoors'
+                wall.Sun_Exposure = 'SunExposed'
+                wall.Wind_Exposure = 'WindExposed'
+            else:
+                wall.Construction_Name = 'Adiabatic_Construction'
+                wall.Outside_Boundary_Condition = 'Adiabatic'
+                wall.Sun_Exposure = 'NoSun'
+                wall.Wind_Exposure = 'NoWind'
             wall.Zone_Name = zone.Name
-            wall.Outside_Boundary_Condition = 'Adiabatic'
-            wall.Sun_Exposure = 'NoSun'
-            wall.Wind_Exposure = 'NoWind'
             wall.View_Factor_to_Ground = 0
             wall.Number_of_Vertices = 4
             for i, (x, y, z) in enumerate(vertices, 1):
                 setattr(wall, f'Vertex_{i}_Xcoordinate', x)
                 setattr(wall, f'Vertex_{i}_Ycoordinate', y)
                 setattr(wall, f'Vertex_{i}_Zcoordinate', z)
+        
+        return zone.Name
+
+    def _add_constructions(self, idf, scenario):
+        """Add construction and material definitions"""
+        try:
+            ground_temp = idf.newidfobject('SITE:GROUNDTEMPERATURE:BUILDINGSURFACE')
+            for month in ['January', 'February', 'March', 'April', 'May', 'June',
+                          'July', 'August', 'September', 'October', 'November', 'December']:
+                setattr(ground_temp, f'{month}_Ground_Temperature', 17.0)
+        except Exception:
+            pass
+            
+        wall_u = scenario.get('wall_u', 0.19)
+        wall_r = 1.0 / wall_u
+        
+        wall_mat = idf.newidfobject('MATERIAL:NOMASS')
+        wall_mat.Name = 'Wall_Material'
+        wall_mat.Roughness = 'Smooth'
+        wall_mat.Thermal_Resistance = wall_r
+        wall_mat.Thermal_Absorptance = 0.9
+        wall_mat.Solar_Absorptance = 0.7
+        wall_mat.Visible_Absorptance = 0.7
+        
+        wall_const = idf.newidfobject('CONSTRUCTION')
+        wall_const.Name = 'Wall_Construction'
+        wall_const.Outside_Layer = 'Wall_Material'
+        
+        floor_u = scenario.get('floor_u', 0.50)
+        floor_r = 1.0 / floor_u
+        
+        floor_mat = idf.newidfobject('MATERIAL:NOMASS')
+        floor_mat.Name = 'Floor_Material'
+        floor_mat.Roughness = 'Smooth'
+        floor_mat.Thermal_Resistance = floor_r
+        floor_mat.Thermal_Absorptance = 0.9
+        floor_mat.Solar_Absorptance = 0.7
+        floor_mat.Visible_Absorptance = 0.7
+        
+        floor_const = idf.newidfobject('CONSTRUCTION')
+        floor_const.Name = 'Floor_Construction'
+        floor_const.Outside_Layer = 'Floor_Material'
         
         construction = idf.newidfobject('CONSTRUCTION')
         construction.Name = 'Adiabatic_Construction'
@@ -236,7 +286,7 @@ class SimplifiedIDFGenerator:
         dclc_eff = cooling['dclc_effectiveness']
         rdhx_eff = cooling['rdhx_effectiveness']
         
-        # Base fraction of heat entering the zone air (not captured by liquid cooling)
+        #Base fraction of heat entering the zone air (not captured by liquid cooling)
         raw_frac_to_air = (1.0 - dclc_eff) * (1.0 - rdhx_eff)
         
         hx = scenario.get('heat_exchangers', {'count': 0, 'capacity_each': 0})
@@ -302,27 +352,67 @@ class SimplifiedIDFGenerator:
         for job in schedules:
             schedule_name = f'{name}_{job["name"]}_Schedule'
             
-            schedule = idf.newidfobject('SCHEDULE:COMPACT')
-            schedule.Name = schedule_name
-            schedule.Schedule_Type_Limits_Name = 'Fraction'
-            schedule.Field_1 = 'Through: 12/31'
-            schedule.Field_2 = 'For: AllDays'
+            self._create_job_schedule(idf, schedule_name, job)
             
-            if job['start_hour'] > 0:
-                schedule.Field_3 = f'Until: {job["start_hour"]:02d}:00'
-                schedule.Field_4 = 0.0
+            #Calculate fraction lost and radiant for this job
+            job_power = job['total_power']
+            if job_power > 0:
+                to_air_before_hx = job_power * raw_frac_to_air
+                remaining = max(to_air_before_hx - total_hx_capacity, 0.0)
+                frac_to_air = remaining / job_power
+            else:
+                frac_to_air = 0.0
+                
+            fraction_lost = 1.0 - frac_to_air
+            fraction_radiant = frac_to_air * 0.30
             
-            end_hour = job['start_hour'] + job['duration_hours']
-            if end_hour > 24:
-                end_hour = 24
-            schedule.Field_5 = f'Until: {end_hour:02d}:00'
-            schedule.Field_6 = 1.0
+            equipment = idf.newidfobject('ELECTRICEQUIPMENT')
+            equipment.Name = f'{name}_{job["name"]}'
+            equipment.Zone_or_ZoneList_or_Space_or_SpaceList_Name = zone_name
+            equipment.Schedule_Name = schedule_name
+            equipment.Design_Level_Calculation_Method = 'EquipmentLevel'
+            equipment.Design_Level = job_power
+            equipment.Fraction_Latent = 0.0
+            equipment.Fraction_Radiant = fraction_radiant
+            equipment.Fraction_Lost = fraction_lost
+
+    def _create_job_schedule(self, idf, schedule_name, job):
+        """Create a compact schedule for a job, supporting midnight wrapping"""
+        schedule = idf.newidfobject('SCHEDULE:COMPACT')
+        schedule.Name = schedule_name
+        schedule.Schedule_Type_Limits_Name = 'Fraction'
+        schedule.Field_1 = 'Through: 12/31'
+        schedule.Field_2 = 'For: AllDays'
+        
+        start_hour = int(job['start_hour'])
+        duration = float(job.get('duration_hours', job.get('duration', 0.0)))
+        end_hour = start_hour + duration
+        
+        if end_hour > 24.0:
+            wrapped_end = int(end_hour - 24.0)
+            schedule.Field_3 = f'Until: {wrapped_end:02d}:00'
+            schedule.Field_4 = 1.0
+            schedule.Field_5 = f'Until: {start_hour:02d}:00'
+            schedule.Field_6 = 0.0
+            schedule.Field_7 = 'Until: 24:00'
+            schedule.Field_8 = 1.0
+        else:
+            current_field = 3
+            if start_hour > 0:
+                setattr(schedule, f'Field_{current_field}', f'Until: {start_hour:02d}:00')
+                setattr(schedule, f'Field_{current_field+1}', 0.0)
+                current_field += 2
             
-            if end_hour < 24:
-                schedule.Field_7 = 'Until: 24:00'
-                schedule.Field_8 = 0.0
+            end_hour_int = int(end_hour)
+            setattr(schedule, f'Field_{current_field}', f'Until: {end_hour_int:02d}:00')
+            setattr(schedule, f'Field_{current_field+1}', 1.0)
+            current_field += 2
             
-            # Calculate fraction lost and radiant for this job
+            if end_hour_int < 24:
+                setattr(schedule, f'Field_{current_field}', 'Until: 24:00')
+                setattr(schedule, f'Field_{current_field+1}', 0.0)
+            
+            #Calculate fraction lost and radiant for this job
             job_power = job['total_power']
             if job_power > 0:
                 to_air_before_hx = job_power * raw_frac_to_air
@@ -412,25 +502,27 @@ class SimplifiedIDFGenerator:
         temp_type.Numeric_Type = 'Continuous'
         temp_type.Unit_Type = 'Temperature'
     
+    def generate_scenario_from_dict(self, scenario, filepath):
+        """Generate IDF file for a scenario dictionary directly"""
+        idf = self.create_base_idf()
+        zone_name = self.add_zone(idf, scenario)
+        self.add_internal_loads(idf, zone_name, scenario)
+        self.add_ideal_loads(idf, zone_name, scenario)
+        
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        idf.saveas(str(filepath))
+        return filepath
+        
     def generate_scenario(self, scenario_num):
         """Generate IDF file for a specific scenario"""
         scenario = SCENARIOS[scenario_num]
         print(f"\nGenerating Scenario {scenario_num}: {scenario['name']}")
         print(f"Description: {scenario['description']}")
         
-        idf = self.create_base_idf()
-        
-        zone_name = self.add_zone(idf, scenario)
-        
-        self.add_internal_loads(idf, zone_name, scenario)
-        
-        self.add_ideal_loads(idf, zone_name, scenario)
-        
         output_dir = Path('model/scenarios')
-        output_dir.mkdir(exist_ok=True)
-        
         output_file = output_dir / f'scenario_{scenario_num}_{scenario["name"]}_simplified.idf'
-        idf.saveas(str(output_file))
+        self.generate_scenario_from_dict(scenario, output_file)
         
         print(f"✓ Generated: {output_file}")
         return output_file
@@ -611,14 +703,14 @@ class DetailedIDFGenerator:
         zone.Ceiling_Height = room['height']
         zone.Volume = room['length'] * room['width'] * room['height']
         
-        self._add_constructions(idf)
+        self._add_constructions(idf, scenario)
         
         floor = idf.newidfobject('BUILDINGSURFACE:DETAILED')
         floor.Name = f'{name}_Floor'
         floor.Surface_Type = 'Floor'
-        floor.Construction_Name = 'Adiabatic_Construction'
+        floor.Construction_Name = 'Floor_Construction'
         floor.Zone_Name = zone.Name
-        floor.Outside_Boundary_Condition = 'Adiabatic'
+        floor.Outside_Boundary_Condition = 'Ground'
         floor.Sun_Exposure = 'NoSun'
         floor.Wind_Exposure = 'NoWind'
         floor.View_Factor_to_Ground = 0
@@ -674,11 +766,17 @@ class DetailedIDFGenerator:
             wall = idf.newidfobject('BUILDINGSURFACE:DETAILED')
             wall.Name = f'{name}_Wall_{wall_name}'
             wall.Surface_Type = 'Wall'
-            wall.Construction_Name = 'Adiabatic_Construction'
+            if wall_name in ['North', 'South']:
+                wall.Construction_Name = 'Wall_Construction'
+                wall.Outside_Boundary_Condition = 'Outdoors'
+                wall.Sun_Exposure = 'SunExposed'
+                wall.Wind_Exposure = 'WindExposed'
+            else:
+                wall.Construction_Name = 'Adiabatic_Construction'
+                wall.Outside_Boundary_Condition = 'Adiabatic'
+                wall.Sun_Exposure = 'NoSun'
+                wall.Wind_Exposure = 'NoWind'
             wall.Zone_Name = zone.Name
-            wall.Outside_Boundary_Condition = 'Adiabatic'
-            wall.Sun_Exposure = 'NoSun'
-            wall.Wind_Exposure = 'NoWind'
             wall.View_Factor_to_Ground = 0
             wall.Number_of_Vertices = 4
             for i, (x, y, z) in enumerate(vertices, 1):
@@ -688,8 +786,46 @@ class DetailedIDFGenerator:
         
         return zone.Name
     
-    def _add_constructions(self, idf):
+    def _add_constructions(self, idf, scenario):
         """Add construction and material definitions"""
+        try:
+            ground_temp = idf.newidfobject('SITE:GROUNDTEMPERATURE:BUILDINGSURFACE')
+            for month in ['January', 'February', 'March', 'April', 'May', 'June',
+                          'July', 'August', 'September', 'October', 'November', 'December']:
+                setattr(ground_temp, f'{month}_Ground_Temperature', 17.0)
+        except Exception:
+            pass
+            
+        wall_u = scenario.get('wall_u', 0.19)
+        wall_r = 1.0 / wall_u
+        
+        wall_mat = idf.newidfobject('MATERIAL:NOMASS')
+        wall_mat.Name = 'Wall_Material'
+        wall_mat.Roughness = 'Smooth'
+        wall_mat.Thermal_Resistance = wall_r
+        wall_mat.Thermal_Absorptance = 0.9
+        wall_mat.Solar_Absorptance = 0.7
+        wall_mat.Visible_Absorptance = 0.7
+        
+        wall_const = idf.newidfobject('CONSTRUCTION')
+        wall_const.Name = 'Wall_Construction'
+        wall_const.Outside_Layer = 'Wall_Material'
+        
+        floor_u = scenario.get('floor_u', 0.50)
+        floor_r = 1.0 / floor_u
+        
+        floor_mat = idf.newidfobject('MATERIAL:NOMASS')
+        floor_mat.Name = 'Floor_Material'
+        floor_mat.Roughness = 'Smooth'
+        floor_mat.Thermal_Resistance = floor_r
+        floor_mat.Thermal_Absorptance = 0.9
+        floor_mat.Solar_Absorptance = 0.7
+        floor_mat.Visible_Absorptance = 0.7
+        
+        floor_const = idf.newidfobject('CONSTRUCTION')
+        floor_const.Name = 'Floor_Construction'
+        floor_const.Outside_Layer = 'Floor_Material'
+        
         construction = idf.newidfobject('CONSTRUCTION')
         construction.Name = 'Adiabatic_Construction'
         construction.Outside_Layer = 'Adiabatic_Material'
@@ -704,6 +840,42 @@ class DetailedIDFGenerator:
         material.Thermal_Absorptance = 0.9
         material.Solar_Absorptance = 0.7
         material.Visible_Absorptance = 0.7
+
+    def _create_job_schedule(self, idf, schedule_name, job):
+        """Create a compact schedule for a job, supporting midnight wrapping"""
+        schedule = idf.newidfobject('SCHEDULE:COMPACT')
+        schedule.Name = schedule_name
+        schedule.Schedule_Type_Limits_Name = 'Fraction'
+        schedule.Field_1 = 'Through: 12/31'
+        schedule.Field_2 = 'For: AllDays'
+        
+        start_hour = int(job['start_hour'])
+        duration = float(job.get('duration_hours', job.get('duration', 0.0)))
+        end_hour = start_hour + duration
+        
+        if end_hour > 24.0:
+            wrapped_end = int(end_hour - 24.0)
+            schedule.Field_3 = f'Until: {wrapped_end:02d}:00'
+            schedule.Field_4 = 1.0
+            schedule.Field_5 = f'Until: {start_hour:02d}:00'
+            schedule.Field_6 = 0.0
+            schedule.Field_7 = 'Until: 24:00'
+            schedule.Field_8 = 1.0
+        else:
+            current_field = 3
+            if start_hour > 0:
+                setattr(schedule, f'Field_{current_field}', f'Until: {start_hour:02d}:00')
+                setattr(schedule, f'Field_{current_field+1}', 0.0)
+                current_field += 2
+            
+            end_hour_int = int(end_hour)
+            setattr(schedule, f'Field_{current_field}', f'Until: {end_hour_int:02d}:00')
+            setattr(schedule, f'Field_{current_field+1}', 1.0)
+            current_field += 2
+            
+            if end_hour_int < 24:
+                setattr(schedule, f'Field_{current_field}', 'Until: 24:00')
+                setattr(schedule, f'Field_{current_field+1}', 0.0)
 
 
     def add_ite_equipment(self, idf, zone_name, scenario):
@@ -721,45 +893,66 @@ class DetailedIDFGenerator:
         hx = scenario.get('heat_exchangers', {'count': 0, 'capacity_each': 0})
         total_hx_capacity = hx['count'] * hx['capacity_each']
         
-        total_power = racks['total_power']
-        if total_power > 0:
-            to_air_before_hx = total_power * raw_frac_to_air
-            remaining = max(to_air_before_hx - total_hx_capacity, 0.0)
-            frac_to_air = remaining / total_power
-        else:
-            frac_to_air = 0.0
-        
-        operation_schedule = self._create_constant_schedule(idf, f'{name}_Operation', 1.0)
-        cpu_schedule = self._create_constant_schedule(idf, f'{name}_CPU', 1.0)
-        
         self._add_ite_curves(idf, name)
         
-        ite = idf.newidfobject('ELECTRICEQUIPMENT:ITE:AIRCOOLED')
-        ite.Name = f'{name}_Servers'
-        ite.Zone_or_Space_Name = zone_name
-        ite.Air_Flow_Calculation_Method = 'FlowFromSystem'
-        ite.Design_Power_Input_Calculation_Method = 'Watts/Unit'
-        ite.Watts_per_Unit = racks['power_per_rack'] * frac_to_air
-        ite.Number_of_Units = racks['total_racks']
-        ite.Design_Power_Input_Schedule_Name = operation_schedule
-        ite.CPU_Loading_Schedule_Name = cpu_schedule
-        ite.CPU_Power_Input_Function_of_Loading_and_Air_Temperature_Curve_Name = f'{name}_Power_fLoadTemp'
-        ite.Design_Fan_Power_Input_Fraction = 0.4
-        ite.Design_Fan_Air_Flow_Rate_per_Power_Input = 0.0001
-        ite.Air_Flow_Function_of_Loading_and_Air_Temperature_Curve_Name = f'{name}_Airflow_fLoadTemp'
-        ite.Fan_Power_Input_Function_of_Flow_Curve_Name = f'{name}_FanPower_fFlow'
-        ite.Design_Entering_Air_Temperature = 15.0
-        ite.Environmental_Class = 'A3'
-        ite.Air_Inlet_Connection_Type = 'AdjustedSupply'
-        ite.Supply_Air_Node_Name = f'{zone_name}_Inlet_Node'
-        ite.Design_Recirculation_Fraction = 0.1
-        ite.Recirculation_Function_of_Loading_and_Supply_Temperature_Curve_Name = f'{name}_Recirc_fLoadTemp'
-        ite.Design_Electric_Power_Supply_Efficiency = 0.9
-        ite.Electric_Power_Supply_Efficiency_Function_of_Part_Load_Ratio_Curve_Name = f'{name}_UPS_fPLR'
-        ite.Fraction_of_Electric_Power_Supply_Losses_to_Zone = 1.0
-        ite.CPU_EndUse_Subcategory = 'ITE-CPU'
-        ite.Fan_EndUse_Subcategory = 'ITE-Fans'
-        ite.Electric_Power_Supply_EndUse_Subcategory = 'ITE-UPS'
+        # Determine if we have dynamic/scheduled jobs or a single static setup
+        jobs = scenario.get('schedules', [])
+        if not jobs:
+            total_power = racks['total_power']
+            jobs = [{
+                'name': 'ConstantLoad',
+                'start_hour': 0,
+                'duration_hours': 24,
+                'power_level': racks['power_per_rack'] if racks['total_racks'] > 0 else 0,
+                'num_racks': racks['total_racks'],
+                'total_power': total_power
+            }]
+            
+        for idx, job in enumerate(jobs):
+            job_name = f"{name}_{job['name']}_{idx}"
+            job_power = job['total_power']
+            
+            #Calculate fraction to air for this job
+            if job_power > 0:
+                to_air_before_hx = job_power * raw_frac_to_air
+                remaining = max(to_air_before_hx - total_hx_capacity, 0.0)
+                frac_to_air = remaining / job_power
+            else:
+                frac_to_air = 0.0
+                
+            #Create operation and CPU load schedules for this job
+            op_schedule_name = f'{job_name}_OpSchedule'
+            cpu_schedule_name = f'{job_name}_CPUSchedule'
+            
+            self._create_job_schedule(idf, op_schedule_name, job)
+            self._create_job_schedule(idf, cpu_schedule_name, job)
+            
+            ite = idf.newidfobject('ELECTRICEQUIPMENT:ITE:AIRCOOLED')
+            ite.Name = f'{job_name}_Servers'
+            ite.Zone_or_Space_Name = zone_name
+            ite.Air_Flow_Calculation_Method = 'FlowFromSystem'
+            ite.Design_Power_Input_Calculation_Method = 'Watts/Unit'
+            ite.Watts_per_Unit = job['power_level'] * frac_to_air
+            ite.Number_of_Units = job['num_racks']
+            ite.Design_Power_Input_Schedule_Name = op_schedule_name
+            ite.CPU_Loading_Schedule_Name = cpu_schedule_name
+            ite.CPU_Power_Input_Function_of_Loading_and_Air_Temperature_Curve_Name = f'{name}_Power_fLoadTemp'
+            ite.Design_Fan_Power_Input_Fraction = 0.4
+            ite.Design_Fan_Air_Flow_Rate_per_Power_Input = 0.0001
+            ite.Air_Flow_Function_of_Loading_and_Air_Temperature_Curve_Name = f'{name}_Airflow_fLoadTemp'
+            ite.Fan_Power_Input_Function_of_Flow_Curve_Name = f'{name}_FanPower_fFlow'
+            ite.Design_Entering_Air_Temperature = 15.0
+            ite.Environmental_Class = 'A3'
+            ite.Air_Inlet_Connection_Type = 'AdjustedSupply'
+            ite.Supply_Air_Node_Name = f'{zone_name}_Inlet_Node'
+            ite.Design_Recirculation_Fraction = 0.1
+            ite.Recirculation_Function_of_Loading_and_Supply_Temperature_Curve_Name = f'{name}_Recirc_fLoadTemp'
+            ite.Design_Electric_Power_Supply_Efficiency = 0.9
+            ite.Electric_Power_Supply_Efficiency_Function_of_Part_Load_Ratio_Curve_Name = f'{name}_UPS_fPLR'
+            ite.Fraction_of_Electric_Power_Supply_Losses_to_Zone = 1.0
+            ite.CPU_EndUse_Subcategory = 'ITE-CPU'
+            ite.Fan_EndUse_Subcategory = 'ITE-Fans'
+            ite.Electric_Power_Supply_EndUse_Subcategory = 'ITE-UPS'
     
     def _add_ite_curves(self, idf, name):
         """Add performance curves for ITE equipment"""
@@ -1011,25 +1204,27 @@ class DetailedIDFGenerator:
         cool_sched.Field_3 = 'Until: 24:00'
         cool_sched.Field_4 = target_temp + 5.0
     
+    def generate_scenario_from_dict(self, scenario, filepath):
+        """Generate detailed IDF file for a scenario dictionary directly"""
+        idf = self.create_base_idf()
+        zone_name = self.add_zone(idf, scenario)
+        self.add_ite_equipment(idf, zone_name, scenario)
+        self.add_crac_system(idf, zone_name, scenario)
+        
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        idf.saveas(str(filepath))
+        return filepath
+        
     def generate_scenario(self, scenario_num):
         """Generate detailed IDF file for a specific scenario"""
         scenario = SCENARIOS[scenario_num]
         print(f"\nGenerating Detailed Scenario {scenario_num}: {scenario['name']}")
         print(f"Description: {scenario['description']}")
         
-        idf = self.create_base_idf()
-        
-        zone_name = self.add_zone(idf, scenario)
-        
-        self.add_ite_equipment(idf, zone_name, scenario)
-        
-        self.add_crac_system(idf, zone_name, scenario)
-        
         output_dir = Path('model/scenarios')
-        output_dir.mkdir(exist_ok=True)
-        
         output_file = output_dir / f'scenario_{scenario_num}_{scenario["name"]}_detailed.idf'
-        idf.saveas(str(output_file))
+        self.generate_scenario_from_dict(scenario, output_file)
         
         print(f"Generated: {output_file}")
         return output_file

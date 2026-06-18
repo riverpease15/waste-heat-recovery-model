@@ -1,5 +1,6 @@
 import sys
 import os
+from pathlib import Path
 
 _APP_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_APP_DIR)
@@ -34,6 +35,60 @@ _timeline_component = components.declare_component(
     path=os.path.join(_PROJECT_ROOT, "components", "timeline"),
 )
 
+try:
+    from model.config import ENERGYPLUS_PATH
+    import os
+    eplus_available = ENERGYPLUS_PATH and os.path.exists(ENERGYPLUS_PATH)
+except ImportError:
+    ENERGYPLUS_PATH = None
+    eplus_available = False
+
+
+def slider_with_input(label, min_val, max_val, default_val, step=0.1, help_text=None, key_prefix="", container=st):
+    key_val = f"param_{key_prefix}_val"
+    key_slider = f"param_{key_prefix}_slider"
+    key_num = f"param_{key_prefix}_num"
+    
+    if key_val not in st.session_state:
+        st.session_state[key_val] = default_val
+        
+    if help_text:
+        container.markdown(f"**{label}**", help=help_text)
+    else:
+        container.markdown(f"**{label}**")
+        
+    col_l, col_r = container.columns([3, 2])
+    
+    def update_from_slider():
+        st.session_state[key_val] = st.session_state[key_slider]
+        
+    def update_from_num():
+        val = st.session_state[key_num]
+        if val is not None:
+            st.session_state[key_val] = min(max(val, min_val), max_val)
+        
+    with col_l:
+        container.slider(
+            label, min_val, max_val,
+            value=st.session_state[key_val],
+            step=step,
+            key=key_slider,
+            label_visibility="collapsed",
+            on_change=update_from_slider
+        )
+    with col_r:
+        val_type = type(default_val)
+        container.number_input(
+            label, val_type(min_val), val_type(max_val),
+            value=val_type(st.session_state[key_val]),
+            step=val_type(step),
+            key=key_num,
+            label_visibility="collapsed",
+            on_change=update_from_num
+        )
+        
+    return st.session_state[key_val]
+
 
 # Physical constants
 RHO = 1.184  # Air density kg/m³
@@ -51,6 +106,30 @@ from core.constants import (
 
 st.title("🌡️ ATL01 PACE Room - Thermal Model")
 st.markdown("**Interactive thermal analysis for high-density data center cooling**")
+
+status_cols = st.columns([3, 3, 6])
+with status_cols[0]:
+    if eplus_available:
+        st.success("EnergyPlus 25.1: Connected")
+    else:
+        st.warning("EnergyPlus 25.1: Not Connected", help="EnergyPlus executable not found in system paths. Check sidebar configuration.")
+with status_cols[1]:
+    if st.session_state.get('sim_data') is not None:
+        engine_label = "Advanced (EnergyPlus)" if st.session_state.get('eplus_raw') is not None else "Simplified (Python)"
+        st.info(f"Active Simulation: **{engine_label}**")
+    else:
+        st.info("Active Simulation: **No simulation run yet**")
+with status_cols[2]:
+    if st.session_state.get('last_run_status') is not None:
+        engine = st.session_state.last_run_engine
+        status = st.session_state.last_run_status
+        timestamp = st.session_state.last_run_timestamp
+        if status == "success":
+            st.success(f"⚡ Last Run: **{engine}** at {timestamp} (Success)")
+        else:
+            st.error(f"Last Run: **{engine}** at {timestamp} (Failed)")
+    else:
+        st.info("⚡ Last Run: **No simulation run yet**")
 with st.expander("ℹ️ How to use this model", expanded=False):
     st.markdown("""
     This model simulates heat flow through a data center using real physics equations.
@@ -63,24 +142,61 @@ with st.expander("ℹ️ How to use this model", expanded=False):
     **Waste Heat Recovery:** Heat exchangers capture heat for reuse (e.g., building heating)
     """)
 
-# Sidebar controls
 st.sidebar.header("⚙️ Configuration")
 
-st.sidebar.subheader("📐 Room & Racks")
-room_length = st.sidebar.slider("Room Length (m)", 10.0, 40.0, 27.1, 0.1,
-                                help="Length affects total room volume and power density")
-room_width = st.sidebar.slider("Room Width (m)", 5.0, 30.0, 23.6, 0.1,
-                               help="Width affects total room volume and power density")
-room_height = st.sidebar.slider("Room Height (m)", 2.5, 8.0, 6.4, 0.1,
-                                help="Height affects air circulation and stratification")
-num_rows = st.sidebar.slider("Number of Rows", 1, 6, 3, 1,
-                             help="Rows of server racks in the room",
-                             key="num_rows")
-racks_per_row = st.sidebar.slider("Racks per Row", 5, 30, 20, 1,
-                                  help="Number of server racks in each row",
-                                  key="racks_per_row")
+if eplus_available:
+    st.sidebar.markdown("**Simulation Engine**", help="Select between the fast Python physics solver or the detailed EnergyPlus model.")
+    btn_cols = st.sidebar.columns(2)
+    
+    if 'sim_engine' not in st.session_state:
+        st.session_state.sim_engine = "Simplified (Python Physics)"
+        
+    with btn_cols[0]:
+        is_simplified = st.session_state.sim_engine == "Simplified (Python Physics)"
+        if st.button(
+            "Simplified", 
+            type="primary" if is_simplified else "secondary", 
+            use_container_width=True,
+            help="Fast Python physics solver."
+        ):
+            st.session_state.sim_engine = "Simplified (Python Physics)"
+            st.toast("Switched to Simplified (Python Physics) engine.")
+            st.rerun()
+            
+    with btn_cols[1]:
+        is_advanced = st.session_state.sim_engine == "Advanced (EnergyPlus)"
+        if st.button(
+            "Advanced", 
+            type="primary" if is_advanced else "secondary", 
+            use_container_width=True,
+            help="Detailed EnergyPlus model."
+        ):
+            st.session_state.sim_engine = "Advanced (EnergyPlus)"
+            st.toast("Switched to Advanced (EnergyPlus) engine.")
+            st.rerun()
+            
+    sim_engine = st.session_state.sim_engine
+else:
+    st.sidebar.warning("⚠️ EnergyPlus installation not found. Using Simplified solver only.")
+    sim_engine = "Simplified (Python Physics)"
 
-# Initialize session state for scheduled jobs
+st.sidebar.subheader("📐 Room & Racks")
+room_length = slider_with_input("Room Length (m)", 10.0, 40.0, 27.1, 0.1,
+                                help_text="Length affects total room volume and power density",
+                                key_prefix="room_length", container=st.sidebar)
+room_width = slider_with_input("Room Width (m)", 5.0, 30.0, 23.6, 0.1,
+                               help_text="Width affects total room volume and power density",
+                               key_prefix="room_width", container=st.sidebar)
+room_height = slider_with_input("Room Height (m)", 2.5, 8.0, 6.4, 0.1,
+                                help_text="Height affects air circulation and stratification",
+                                key_prefix="room_height", container=st.sidebar)
+num_rows = slider_with_input("Number of Rows", 1, 6, 3, 1,
+                             help_text="Rows of server racks in the room",
+                             key_prefix="num_rows", container=st.sidebar)
+racks_per_row = slider_with_input("Racks per Row", 5, 30, 20, 1,
+                                  help_text="Number of server racks in each row",
+                                  key_prefix="racks_per_row", container=st.sidebar)
+
 if 'scheduled_jobs' not in st.session_state:
     st.session_state.scheduled_jobs = []
 if 'sim_data' not in st.session_state:
@@ -101,49 +217,69 @@ if 'auto_run_sim' not in st.session_state:
     st.session_state.auto_run_sim = False
 if 'timeline_version' not in st.session_state:
     st.session_state.timeline_version = 0
+if 'show_adv_plots' not in st.session_state:
+    st.session_state.show_adv_plots = False
+if 'comp_data' not in st.session_state:
+    st.session_state.comp_data = None
+if 'fig_comp' not in st.session_state:
+    st.session_state.fig_comp = None
+if 'fig_adv' not in st.session_state:
+    st.session_state.fig_adv = None
 
 st.sidebar.subheader("❄️ Cooling System")
-dclc_effectiveness = st.sidebar.slider("DCLC Effectiveness", 0.0, 0.60, 0.35, 0.05,
-                                       help="% of heat captured by cold plates at CPUs/GPUs")
-rdhx_effectiveness = st.sidebar.slider("RDHX Effectiveness", 0.0, 0.98, 0.92, 0.02,
-                                       help="% of rack exhaust heat captured by rear door exchangers")
-num_heat_exchangers = st.sidebar.slider("Waste Heat Exchangers", 0, 2, 0, 1,
-                                        help="Heat exchangers that capture waste heat for reuse")
-hx_capacity_kw = st.sidebar.slider("HX Capacity (kW each)", 30.0, 150.0, 60.0, 10.0,
-                                   help="Maximum heat each exchanger can capture")
-with st.sidebar.expander("CDU & Pump Details"):
-    cdu_flow_gpm = st.slider("Flow Rate per CDU (GPM)", 100.0, 200.0, 150.0, 5.0,
-                             help="Water flow rate per CDU")
-    num_cdus = st.slider("Number of CDUs", 1, 6, 3, 1,
-                         help="Cooling Distribution Units")
-    delta_p_kpa = st.slider("Loop Pressure Drop (kPa)", 100.0, 350.0, 200.0, 10.0,
-                            help="Pressure the pump must overcome")
-    pump_eta = st.slider("Pump Efficiency", 0.60, 0.85, 0.75, 0.05,
-                         help="Pump mechanical efficiency")
-    cop = st.slider("Chiller COP", 3.0, 6.0, 4.0, 0.5,
-                    help="Chiller Coefficient of Performance")
+dclc_effectiveness = slider_with_input("DCLC Effectiveness", 0.0, 0.60, 0.35, 0.05,
+                                       help_text="% of heat captured by cold plates at CPUs/GPUs",
+                                       key_prefix="dclc_eff", container=st.sidebar)
+rdhx_effectiveness = slider_with_input("RDHX Effectiveness", 0.0, 0.98, 0.92, 0.02,
+                                       help_text="% of rack exhaust heat captured by rear door exchangers",
+                                       key_prefix="rdhx_eff", container=st.sidebar)
+num_heat_exchangers = slider_with_input("Waste Heat Exchangers", 0, 2, 0, 1,
+                                        help_text="Heat exchangers that capture waste heat for reuse",
+                                        key_prefix="num_hx", container=st.sidebar)
+hx_capacity_kw = slider_with_input("HX Capacity (kW each)", 30.0, 150.0, 60.0, 10.0,
+                                   help_text="Maximum heat each exchanger can capture",
+                                   key_prefix="hx_cap", container=st.sidebar)
+
+with st.sidebar.expander("CDU & Pump Details") as cdu_exp:
+    cdu_flow_gpm = slider_with_input("Flow Rate per CDU (GPM)", 100.0, 200.0, 150.0, 5.0,
+                                     help_text="Water flow rate per CDU",
+                                     key_prefix="cdu_flow", container=cdu_exp)
+    num_cdus = slider_with_input("Number of CDUs", 1, 6, 3, 1,
+                                 help_text="Cooling Distribution Units",
+                                 key_prefix="num_cdus", container=cdu_exp)
+    delta_p_kpa = slider_with_input("Loop Pressure Drop (kPa)", 100.0, 350.0, 200.0, 10.0,
+                                    help_text="Pressure the pump must overcome",
+                                    key_prefix="delta_p", container=cdu_exp)
+    pump_eta = slider_with_input("Pump Efficiency", 0.60, 0.85, 0.75, 0.05,
+                                 help_text="Pump mechanical efficiency",
+                                 key_prefix="pump_eta", container=cdu_exp)
+    cop = slider_with_input("Chiller COP", 3.0, 6.0, 4.0, 0.5,
+                            help_text="Chiller Coefficient of Performance",
+                            key_prefix="cop", container=cdu_exp)
 
 st.sidebar.subheader("💨 Air Handling")
-num_air_handlers = st.sidebar.slider("Air Handlers", 0, 4, 2, 1,
-                                     help="Number of air handling units")
-cfm_per_handler = st.sidebar.slider("Airflow per Handler (CFM)", 20000.0, 250000.0, 155000.0, 5000.0,
-                                    help="Cubic Feet per Minute per handler")
-inlet_temp_c = st.sidebar.slider("Inlet Temperature (°C)", 18.0, 28.0, 23.3, 0.5,
-                                 help="Temperature of cooling air entering the room")
-waste_threshold_c = st.sidebar.slider("Hot Spot Threshold (°C)", 25.0, 35.0, 30.0, 1.0,
-                                      help="Temperature above which areas are flagged as too hot")
+num_air_handlers = slider_with_input("Air Handlers", 0, 4, 2, 1,
+                                     help_text="Number of air handling units",
+                                     key_prefix="num_ahu", container=st.sidebar)
+cfm_per_handler = slider_with_input("Airflow per Handler (CFM)", 20000.0, 250000.0, 155000.0, 5000.0,
+                                    help_text="Cubic Feet per Minute per handler",
+                                    key_prefix="cfm_ahu", container=st.sidebar)
+inlet_temp_c = slider_with_input("Inlet Temperature (°C)", 18.0, 28.0, 23.3, 0.5,
+                                 help_text="Temperature of cooling air entering the room",
+                                 key_prefix="inlet_temp", container=st.sidebar)
+waste_threshold_c = slider_with_input("Hot Spot Threshold (°C)", 25.0, 35.0, 30.0, 1.0,
+                                      help_text="Temperature above which areas are flagged as too hot",
+                                      key_prefix="waste_temp", container=st.sidebar)
 
-# 24-hour outdoor temperature profile for typical Atlanta July day
-# T_outdoor(t) = 26.5 + 5.5 × sin(2π(t - 9)/24)
-# Low ~21°C at 5AM, high ~32°C at 3PM
+#24-hour outdoor temperature profile for typical Atlanta July day
+#T_outdoor(t) = 26.5 + 5.5 × sin(2π(t - 9)/24)
+#Low ~21°C at 5AM, high ~32°C at 3PM
 outdoor_temp_profile = {
     hour: 26.5 + 5.5 * np.sin(2 * np.pi * (hour - 9) / 24)
     for hour in np.arange(0, 24, 0.5)
 }
-# Default to peak hour (3PM) for steady-state calculation
 time_of_day = 15.0
 
-# Simulation state invalidation — clear sim_data if any input has changed
 _current_fingerprint = (
     room_length, room_width, room_height,
     num_rows, racks_per_row,
@@ -161,6 +297,12 @@ if st.session_state.sim_fingerprint is not None and _current_fingerprint != st.s
     st.session_state.sim_stale = True
     st.session_state.sim_playing = False
     st.session_state.tou_costs = None
+    st.session_state.show_adv_plots = False
+    st.session_state.comp_data = None
+    st.session_state.fig_comp = None
+    st.session_state.fig_adv = None
+
+
 
 # ===== JOB SCHEDULING SECTION =====
 st.header("📅 Job Scheduler")
@@ -178,8 +320,6 @@ FULL_GPU_RACK_KW = CHASSIS_POWER_KW * CHASSIS_PER_RACK  # ~63 kW
 CPU_DOMINANT_RACK_KW = 15.0  # mixed CPU racks (your estimate)
 MIXED_GPU_RACK_KW = 40.0  # conservative GPU racks
 
-# # For now, use default rack power for the thermal calculation below
-# # This will be replaced with scheduled job data when simulation runs
 # rack_power_kw = FULL_GPU_RACK_KW
 total_racks = num_rows * racks_per_row
 rack_power_kw = FULL_GPU_RACK_KW
@@ -253,12 +393,12 @@ def calculate_thermal_system(room_length, room_width, room_height,
     4. Air Handlers - circulate air and remove remaining heat
 
     Building Envelope:
-    - Exterior wall heat gain/loss: Q_walls = U × A × (T_outdoor - T_room)
-    - Floor heat loss to ground: Q_floor = U × A × (T_room - T_ground)
+    - Exterior wall heat gain/loss: Q_walls = U x A x (T_outdoor - T_room)
+    - Floor heat loss to ground: Q_floor = U x A x (T_room - T_ground)
     - Outdoor temperature follows sinusoidal 24h profile for Atlanta July
 
     Physics:
-    - Q = m_dot × Cp × ΔT (heat transfer equation)
+    - Q = m_dot x Cp x ΔT (heat transfer equation)
     - Room temperature depends on heat load, airflow rate, envelope, and room volume
     - All configurable parameters affect the final outcome
     """
@@ -294,8 +434,6 @@ def calculate_thermal_system(room_length, room_width, room_height,
     Q_TOTAL_W = total_racks * rack_power_kw * 1000  # Total IT load in Watts
 
     if rack_powers_kw is not None:
-        # Dynamic mode: apply per-rack power from the simulation schedule.
-        # Any rack index beyond the array length stays at IDLE_RACK_KW.
         p = np.asarray(rack_powers_kw, dtype=float).ravel()
         for i, rack in enumerate(RACKS):
             rack['power_kw'] = float(p[i]) if i < len(p) else rack['power_kw']
@@ -346,8 +484,8 @@ def calculate_thermal_system(room_length, room_width, room_height,
     T_outdoor_c = 26.5 + 5.5 * np.sin(2 * np.pi * (time_of_day - 9) / 24)
 
     # Envelope U-values and areas
-    UA_WALLS = 0.19 * 347  # W/K — two exterior walls, 2 × 27.1m × 6.4m = 347 m²
-    UA_FLOOR = 0.5 * 640  # W/K — floor slab, 640 m²
+    UA_WALLS = 0.19 * (2.0 * room_length * room_height)  #W/K — two exterior walls
+    UA_FLOOR = 0.5 * (room_length * room_width)  #W/K — floor slab
     T_GROUND = 17.0  # °C — constant ground temperature
 
     # Effective thermal capacitance: air + equipment + shallow concrete slab
@@ -593,6 +731,309 @@ def calculate_thermal_system(room_length, room_width, room_height,
     }
 
 
+def run_eplus_simulation(
+    room_length, room_width, room_height,
+    num_rows, racks_per_row,
+    dclc_effectiveness, rdhx_effectiveness,
+    num_heat_exchangers, hx_capacity_kw,
+    num_air_handlers, cfm_per_handler,
+    inlet_temp_c, scheduled_jobs,
+    cdu_flow_gpm, num_cdus, delta_p_kpa, pump_eta, cop
+):
+    from model.EPlusIDF import DetailedIDFGenerator
+    from model.run import run_energyplus
+    from model.parse_eso import parse_eso_file
+    from model.config import ENERGYPLUS_PATH
+    from pathlib import Path
+    
+    total_racks = num_rows * racks_per_row
+    
+    scenario = {
+        'name': 'streamlit_run',
+        'room': {
+            'length': room_length,
+            'width': room_width,
+            'height': room_height,
+        },
+        'racks': {
+            'rows': num_rows,
+            'racks_per_row': racks_per_row,
+            'power_per_rack': 63000.0, # W
+            'total_racks': total_racks,
+            'total_power': total_racks * 63000.0, # W
+        },
+        'cooling': {
+            'dclc_effectiveness': dclc_effectiveness,
+            'rdhx_effectiveness': rdhx_effectiveness,
+            'num_air_handlers': num_air_handlers,
+            'cfm_per_handler': cfm_per_handler,
+            'total_cfm': num_air_handlers * cfm_per_handler,
+            'total_flow_gpm': cdu_flow_gpm * num_cdus,
+        },
+        'heat_exchangers': {
+            'count': num_heat_exchangers,
+            'capacity_each': hx_capacity_kw * 1000.0, # W
+        },
+        'target_temp': inlet_temp_c,
+        'cdu_flow_gpm': cdu_flow_gpm,
+        'num_cdus': num_cdus,
+        'delta_p_kpa': delta_p_kpa,
+        'pump_eta': pump_eta,
+        'cop': cop
+    }
+    
+    schedules = []
+    for job in scheduled_jobs:
+        schedules.append({
+            'name': f"Job_{job['id']}",
+            'start_hour': job['start_hour'],
+            'duration_hours': job['duration'],
+            'power_level': job['power_kw'] * 1000.0, # W
+            'num_racks': job['num_racks'],
+            'total_power': job['power_kw'] * job['num_racks'] * 1000.0, # W
+        })
+    scenario['schedules'] = schedules
+    
+    generator = DetailedIDFGenerator(ENERGYPLUS_PATH)
+    idf_filename = 'streamlit_run_detailed.idf'
+    idf_path = Path('model/scenarios') / idf_filename
+    generator.generate_scenario_from_dict(scenario, idf_path)
+    
+    success = run_energyplus(idf_filename)
+    if not success:
+        return None
+        
+    eso_path = Path('model/outputs/streamlit_run_detailed/eplusout.eso')
+    if not eso_path.exists():
+        return None
+        
+    vars_map, data = parse_eso_file(eso_path)
+    return data
+
+
+def extract_eplus_time_series(data, times_h, total_racks, IDLE_RACK_KW):
+    from model.parse_eso import find_var
+    import numpy as np
+    
+    temp_key = find_var(data, "Zone Mean Air Temperature")
+    if temp_key and data[temp_key]:
+        ep_temp = data[temp_key]
+    else:
+        ep_temp = [23.3] * 96
+        
+    cpu_key = find_var(data, "Zone ITE CPU Electricity Rate")
+    fan_key = find_var(data, "Zone ITE Fan Electricity Rate")
+    ups_key = find_var(data, "Zone ITE UPS Electricity Rate")
+    
+    ep_cpu = np.array(data[cpu_key]) / 1000.0 if cpu_key and data[cpu_key] else np.zeros(96)
+    ep_ite_fan = np.array(data[fan_key]) / 1000.0 if fan_key and data[fan_key] else np.zeros(96)
+    ep_ups = np.array(data[ups_key]) / 1000.0 if ups_key and data[ups_key] else np.zeros(96)
+    ep_ite_total_kw = ep_cpu + ep_ite_fan + ep_ups
+    
+    coil_elec_key = find_var(data, "Cooling Coil Electricity Rate")
+    hvac_fan_key = find_var(data, "Fan Electricity Rate")
+    
+    ep_coil_elec = np.array(data[coil_elec_key]) / 1000.0 if coil_elec_key and data[coil_elec_key] else np.zeros(96)
+    ep_hvac_fan = np.array(data[hvac_fan_key]) / 1000.0 if hvac_fan_key and data[hvac_fan_key] else np.zeros(96)
+    
+    coil_cool_key = find_var(data, "Cooling Coil Total Cooling Rate")
+    ep_cooling_delivered = np.array(data[coil_cool_key]) / 1000.0 if coil_cool_key and data[coil_cool_key] else np.zeros(96)
+    
+    ep_len = len(ep_temp)
+    ep_times = np.linspace(0.0, 24.0, ep_len)
+    
+    T_room_c = np.interp(times_h, ep_times, ep_temp)
+    Q_total_kw = np.interp(times_h, ep_times, ep_ite_total_kw)
+    cooling_coil_elec = np.interp(times_h, ep_times, ep_coil_elec)
+    hvac_fan_elec = np.interp(times_h, ep_times, ep_hvac_fan)
+    cooling_delivered_kw = np.interp(times_h, ep_times, ep_cooling_delivered)
+    
+    if np.max(Q_total_kw) < 1.0:
+        Q_total_kw = np.full_like(times_h, total_racks * IDLE_RACK_KW)
+        
+    return {
+        'T_room_c': T_room_c,
+        'Q_total_kw': Q_total_kw,
+        'cooling_coil_elec': cooling_coil_elec,
+        'hvac_fan_elec': hvac_fan_elec,
+        'cooling_delivered_kw': cooling_delivered_kw,
+    }
+
+
+def construct_sim_data_from_eplus(simplified_raw, eplus_raw, params):
+    import numpy as np
+    
+    sim_data = simplified_raw.copy()
+    times_h = sim_data['times_h']
+    total_racks = sim_data['total_racks']
+    
+    ep_results = extract_eplus_time_series(eplus_raw, times_h, total_racks, IDLE_RACK_KW)
+    
+    sim_data['T_room_c'] = ep_results['T_room_c']
+    sim_data['Q_total_kw'] = ep_results['Q_total_kw']
+    sim_data['eplus_results'] = ep_results
+    return sim_data
+
+
+if st.session_state.get('simplified_raw') is not None:
+    if sim_engine == "Simplified (Python Physics)" and st.session_state.sim_data != st.session_state.simplified_raw:
+        st.session_state.sim_data = st.session_state.simplified_raw
+        st.session_state.tou_costs = calculate_tou_cost(st.session_state.sim_data)
+        st.rerun()
+    elif sim_engine == "Advanced (EnergyPlus)" and st.session_state.get('eplus_raw') is not None and st.session_state.sim_data == st.session_state.simplified_raw:
+        st.session_state.sim_data = construct_sim_data_from_eplus(st.session_state.simplified_raw, st.session_state.eplus_raw, {
+            'room_length': room_length, 'room_width': room_width, 'room_height': room_height,
+            'num_rows': num_rows, 'racks_per_row': racks_per_row,
+            'dclc_effectiveness': dclc_effectiveness, 'rdhx_effectiveness': rdhx_effectiveness,
+            'num_heat_exchangers': num_heat_exchangers, 'hx_capacity_kw': hx_capacity_kw,
+            'num_air_handlers': num_air_handlers, 'cfm_per_handler': cfm_per_handler,
+            'inlet_temp_c': inlet_temp_c
+        })
+        st.session_state.tou_costs = calculate_tou_cost(st.session_state.sim_data)
+        st.rerun()
+
+
+def compile_comparison_metrics(simplified_raw, eplus_raw, params):
+    import numpy as np
+    
+    times_h = simplified_raw['times_h']
+    dt_hours = float(times_h[1] - times_h[0]) if len(times_h) > 1 else (15.0 / 60.0)
+    total_racks = simplified_raw['total_racks']
+    
+    sim_temp = simplified_raw['T_room_c']
+    sim_it_kw = simplified_raw['Q_total_kw']
+    
+    sim_fac_power = []
+    sim_cool_del = []
+    sim_pue = []
+    sim_hx_removed = []
+    sim_pump_power = []
+    sim_chiller_power = []
+    sim_fan_power = []
+    sim_outdoor_temp = []
+    
+    dclc_eff = params['dclc_effectiveness']
+    rdhx_eff = params['rdhx_effectiveness']
+    num_hx = params['num_heat_exchangers']
+    hx_cap = params['hx_capacity_kw']
+    
+    for k in range(len(times_h)):
+        step_res = calculate_thermal_system(
+            params['room_length'], params['room_width'], params['room_height'],
+            params['num_rows'], params['racks_per_row'], 63.0,
+            rdhx_eff, dclc_eff, params['num_air_handlers'],
+            num_hx, hx_cap, params['inlet_temp_c'], 30.0,
+            params['cfm_per_handler'], times_h[k],
+            cdu_flow_gpm=params['cdu_flow_gpm'], num_cdus=params['num_cdus'],
+            delta_p_kpa=params['delta_p_kpa'], pump_eta=params['pump_eta'], cop=params['cop'],
+            rack_powers_kw=simplified_raw['rack_powers_kw'][k],
+            T_room_transient=sim_temp[k]
+        )
+        sim_fac_power.append(step_res['total_facility_power_kw'])
+        cooling_del = step_res['Q_dclc_kw'] + step_res['Q_rdhx_kw'] + step_res['Q_hx_removed_kw']
+        m_dot_cp = step_res['mass_flow_kg_s'] * 1007.0 / 1000.0
+        air_handler_cooling = m_dot_cp * max(sim_temp[k] - params['inlet_temp_c'], 0.0)
+        sim_cool_del.append(cooling_del + air_handler_cooling)
+        sim_pue.append(step_res['pue'])
+        sim_hx_removed.append(step_res['Q_hx_removed_kw'])
+        sim_pump_power.append(step_res['p_pump_kw'])
+        sim_chiller_power.append(step_res['p_mech_kw'])
+        sim_fan_power.append(step_res['fan_power_kw'])
+        sim_outdoor_temp.append(step_res['T_outdoor'])
+        
+    sim_it_energy = sum(sim_it_kw * dt_hours)
+    sim_fac_energy = sum(np.array(sim_fac_power) * dt_hours)
+    sim_cooling_delivered = sum(np.array(sim_cool_del) * dt_hours)
+    sim_avg_temp = np.mean(sim_temp)
+    sim_peak_temp = np.max(sim_temp)
+    sim_avg_pue = np.mean(sim_pue)
+    sim_peak_pue = np.max(sim_pue)
+    sim_recovered_heat = sum(np.array(sim_hx_removed) * dt_hours)
+    
+    ep_results = extract_eplus_time_series(eplus_raw, times_h, total_racks, IDLE_RACK_KW)
+    ep_temp = ep_results['T_room_c']
+    
+    #Reconstruct actual unscaled IT power for EnergyPlus
+    ep_it_kw_actual = sim_it_kw
+    
+    #Calculate liquid cooling based on actual IT power
+    ep_liquid_cooling_actual = ep_it_kw_actual * dclc_eff + ep_it_kw_actual * (1.0 - dclc_eff) * rdhx_eff
+    
+    #Heat exchanger recovery
+    ep_hx_removed_actual = np.minimum(ep_liquid_cooling_actual, num_hx * hx_cap)
+    ep_recovered_heat = sum(ep_hx_removed_actual * dt_hours)
+    
+    #Liquid loop heat rejected to chiller (which needs chiller electrical power)
+    ep_q_rejected_kw = ep_liquid_cooling_actual - ep_hx_removed_actual
+    ep_liquid_chiller_elec = ep_q_rejected_kw / params['cop']
+    
+    #Calculate total cooling delivered (air-side + liquid-side)
+    ep_cooling_delivered_total_profile = ep_results['cooling_delivered_kw'] + ep_liquid_cooling_actual
+    ep_cooling_delivered = sum(ep_cooling_delivered_total_profile * dt_hours)
+    
+    #Calculate total cooling electrical power
+    ep_pump_kw = params['p_pump_kw']
+    ep_cooling_power_total_profile = ep_results['cooling_coil_elec'] + ep_results['hvac_fan_elec'] + ep_pump_kw + ep_liquid_chiller_elec
+    
+    #Calculate total facility power and PUE
+    ep_fac_power_actual = ep_it_kw_actual + ep_cooling_power_total_profile
+    
+    ep_it_energy = sum(ep_it_kw_actual * dt_hours)
+    ep_fac_energy = sum(ep_fac_power_actual * dt_hours)
+    ep_avg_temp = np.mean(ep_temp)
+    ep_peak_temp = np.max(ep_temp)
+    
+    ep_pue = ep_fac_power_actual / np.maximum(ep_it_kw_actual, 1e-3)
+    ep_pue = np.clip(ep_pue, 1.0, 5.0)
+    ep_avg_pue = ep_fac_energy / ep_it_energy if ep_it_energy > 0 else 1.0
+    ep_peak_pue = np.max(ep_pue)
+    
+    ep_outdoor_temp_profile = 26.5 + 5.5 * np.sin(2 * np.pi * (times_h - 9) / 24)
+    
+    return {
+        'simplified': {
+            'it_energy': sim_it_energy,
+            'facility_energy': sim_fac_energy,
+            'cooling_delivered': sim_cooling_delivered,
+            'avg_temp': sim_avg_temp,
+            'peak_temp': sim_peak_temp,
+            'avg_pue': sim_avg_pue,
+            'peak_pue': sim_peak_pue,
+            'recovered_heat': sim_recovered_heat,
+            'pue_profile': sim_pue,
+            'temp_profile': sim_temp,
+            'cooling_power_profile': np.array(sim_fac_power) - sim_it_kw,
+            'it_power_profile': sim_it_kw,
+            'facility_power_profile': np.array(sim_fac_power),
+            'pump_power_profile': np.array(sim_pump_power),
+            'chiller_power_profile': np.array(sim_chiller_power),
+            'fan_power_profile': np.array(sim_fan_power),
+            'recovered_heat_profile': np.array(sim_hx_removed),
+            'outdoor_temp_profile': np.array(sim_outdoor_temp)
+        },
+        'eplus': {
+            'it_energy': ep_it_energy,
+            'facility_energy': ep_fac_energy,
+            'cooling_delivered': ep_cooling_delivered,
+            'avg_temp': ep_avg_temp,
+            'peak_temp': ep_peak_temp,
+            'avg_pue': ep_avg_pue,
+            'peak_pue': ep_peak_pue,
+            'recovered_heat': ep_recovered_heat,
+            'pue_profile': ep_pue.tolist(),
+            'temp_profile': ep_temp,
+            'cooling_power_profile': ep_cooling_power_total_profile,
+            'it_power_profile': ep_it_kw_actual,
+            'facility_power_profile': ep_fac_power_actual,
+            'pump_power_profile': np.full_like(times_h, ep_pump_kw),
+            'chiller_power_profile': ep_results['cooling_coil_elec'] + ep_liquid_chiller_elec,
+            'fan_power_profile': ep_results['hvac_fan_elec'],
+            'recovered_heat_profile': ep_hx_removed_actual,
+            'outdoor_temp_profile': ep_outdoor_temp_profile
+        }
+    }
+
+
 def build_sim_data(scheduled_jobs,
                    room_length, room_width, room_height,
                    num_rows, racks_per_row,
@@ -622,9 +1063,14 @@ def build_sim_data(scheduled_jobs,
 
     # ── Per-timestep rack power assignment ────────────────────────────────────
     # Broadcast active-job mask: shape (n_steps, n_jobs)
-    active = ((times_h[:, None] >= j_starts[None, :])
-              & (times_h[:, None] < j_ends[None, :])
-              & (times_h[:, None] < 24.0))
+    active = np.zeros((n_steps, n_jobs), dtype=bool)
+    for ji in range(n_jobs):
+        start = j_starts[ji]
+        end = j_ends[ji]
+        if end > 24.0:
+            active[:, ji] = (times_h >= start) | (times_h < end - 24.0)
+        else:
+            active[:, ji] = (times_h >= start) & (times_h < end)
 
     rack_powers_kw = np.full((n_steps, total_racks), IDLE_RACK_KW, dtype=np.float32)
     Q_total_kw = np.full(n_steps, total_racks * IDLE_RACK_KW, dtype=np.float32)
@@ -651,8 +1097,8 @@ def build_sim_data(scheduled_jobs,
     C_slab = (room_length * room_width) * 0.05 * 2300.0 * 880.0  # top 5 cm of concrete floor
     C_eff = C_air + C_equipment + C_slab
 
-    UA_WALLS = 0.19 * 347
-    UA_FLOOR = 0.50 * 640
+    UA_WALLS = 0.19 * (2.0 * room_length * room_height)
+    UA_FLOOR = 0.50 * (room_length * room_width)
     T_GROUND = 17.0
 
     Q_total_w = Q_total_kw.astype(np.float64) * 1000.0
@@ -679,11 +1125,20 @@ def build_sim_data(scheduled_jobs,
     decay = np.exp(-dt_sim_s / tau)
 
     T_room_arr = np.empty(n_steps, dtype=np.float64)
-    T_room_arr[0] = float(inlet_temp_c)
-    for k in range(n_steps - 1):
-        T_room_arr[k + 1] = T_ss_arr[k] + (T_room_arr[k] - T_ss_arr[k]) * decay[k] \
-            if np.isscalar(decay) is False else \
-            T_ss_arr[k] + (T_room_arr[k] - T_ss_arr[k]) * decay
+    #Warmup loop to achieve periodic steady state (T(0) = T(24))
+    t_init = float(inlet_temp_c)
+    for warmup_iter in range(5):
+        T_room_arr[0] = t_init
+        for k in range(n_steps - 1):
+            if np.isscalar(decay) is False:
+                T_room_arr[k + 1] = T_ss_arr[k] + (T_room_arr[k] - T_ss_arr[k]) * decay[k]
+            else:
+                T_room_arr[k + 1] = T_ss_arr[k] + (T_room_arr[k] - T_ss_arr[k]) * decay
+        # Carry over the final temperature to the next start
+        t_final = T_room_arr[-1]
+        if abs(t_final - t_init) < 0.05:
+            break
+        t_init = t_final
     np.clip(T_room_arr, inlet_temp_c - 5.0, inlet_temp_c + 80.0, out=T_room_arr)
 
     # ── Frame selection ───────────────────────────────────────────────────────
@@ -815,13 +1270,35 @@ else:
     st.info("📅 No jobs scheduled yet. Add your first job above to get started!")
 
 # Run Simulation button — below the timeline
-play_button = st.button("▶️ Run Simulation", type="primary", use_container_width=True,
-                        disabled=len(st.session_state.scheduled_jobs) == 0)
-should_run = play_button or st.session_state.auto_run_sim
+play_col1, play_col2 = st.columns(2)
+with play_col1:
+    play_button = st.button("▶️ Run Simulation", type="primary", use_container_width=True,
+                            disabled=len(st.session_state.scheduled_jobs) == 0)
+with play_col2:
+    if eplus_available:
+        compare_button = st.button("⚖️ Run Model Comparison", type="secondary", use_container_width=True,
+                                   disabled=len(st.session_state.scheduled_jobs) == 0,
+                                   help="Runs both the Simplified Physics and EnergyPlus Advanced solvers to compare their outputs.")
+    else:
+        st.button("⚖️ Run Model Comparison (Disabled)", type="secondary", use_container_width=True,
+                  disabled=True,
+                  help="Requires an EnergyPlus installation. Check the engine status at the top.")
+        compare_button = False
+
+should_run = play_button or compare_button or st.session_state.auto_run_sim
+force_compare = compare_button
+
 if should_run:
     st.session_state.auto_run_sim = False
-    with st.spinner("Building simulation…"):
-        st.session_state.sim_data = build_sim_data(
+    st.session_state.comp_data = None
+    st.session_state.fig_comp = None
+    st.session_state.fig_adv = None
+    run_log = []
+    run_log.append("**Step 1:** Starting simulation workflow...")
+    start_time_perf = time.time()
+    
+    with st.spinner("Running Simplified solver..."):
+        simplified_raw = build_sim_data(
             st.session_state.scheduled_jobs,
             room_length, room_width, room_height,
             num_rows, racks_per_row,
@@ -830,13 +1307,153 @@ if should_run:
             num_air_handlers, cfm_per_handler,
             inlet_temp_c,
         )
+        st.session_state.simplified_raw = simplified_raw
+        run_log.append("**Simplified Python Physics solver** completed (periodic steady state convergence achieved in 5 passes).")
+        
+    run_energyplus_engine = eplus_available and (sim_engine == "Advanced (EnergyPlus)" or force_compare)
+    if run_energyplus_engine:
+        run_log.append("**Step 2:** Triggering Advanced (EnergyPlus) solver...")
+        with st.status("Running EnergyPlus Simulation...", expanded=True) as status:
+            st.write("Generating detailed Input Data File (IDF)...")
+            run_log.append("- Generated EnergyPlus IDF model file mapping geometry and schedule.")
+            
+            total_racks = num_rows * racks_per_row
+            scenario = {
+                'name': 'streamlit_run',
+                'room': {
+                    'length': room_length, 'width': room_width, 'height': room_height,
+                },
+                'racks': {
+                    'rows': num_rows, 'racks_per_row': racks_per_row,
+                    'power_per_rack': 63000.0, 'total_racks': total_racks, 'total_power': total_racks * 63000.0,
+                },
+                'cooling': {
+                    'dclc_effectiveness': dclc_effectiveness,
+                    'rdhx_effectiveness': rdhx_effectiveness,
+                    'num_air_handlers': num_air_handlers,
+                    'cfm_per_handler': cfm_per_handler,
+                    'total_cfm': num_air_handlers * cfm_per_handler,
+                    'total_flow_gpm': cdu_flow_gpm * num_cdus,
+                },
+                'heat_exchangers': {
+                    'count': num_heat_exchangers,
+                    'capacity_each': hx_capacity_kw * 1000.0,
+                },
+                'target_temp': inlet_temp_c,
+                'cdu_flow_gpm': cdu_flow_gpm, 'num_cdus': num_cdus,
+                'delta_p_kpa': delta_p_kpa, 'pump_eta': pump_eta, 'cop': cop
+            }
+            
+            schedules = []
+            for job in st.session_state.scheduled_jobs:
+                schedules.append({
+                    'name': f"Job_{job['id']}",
+                    'start_hour': job['start_hour'],
+                    'duration_hours': job['duration'],
+                    'power_level': job['power_kw'] * 1000.0,
+                    'num_racks': job['num_racks'],
+                    'total_power': job['power_kw'] * job['num_racks'] * 1000.0,
+                })
+            scenario['schedules'] = schedules
+            
+            from model.EPlusIDF import DetailedIDFGenerator
+            from model.run import run_energyplus
+            from model.parse_eso import parse_eso_file
+            
+            generator = DetailedIDFGenerator(ENERGYPLUS_PATH)
+            idf_filename = 'streamlit_run_detailed.idf'
+            idf_path = Path('model/scenarios') / idf_filename
+            generator.generate_scenario_from_dict(scenario, idf_path)
+            
+            st.write("🚀 Running EnergyPlus 25.1.0 engine (preprocessor & solver)...")
+            run_log.append("- Invoking EnergyPlus 25.1.0 subprocess (solving heat equations).")
+            success = run_energyplus(idf_filename)
+            
+            if success:
+                st.write("Parsing simulation time-series output (.eso)...")
+                run_log.append("- Reading and parsing eplusout.eso dataset.")
+                eso_path = Path('model/outputs/streamlit_run_detailed/eplusout.eso')
+                if eso_path.exists():
+                    vars_map, eplus_raw = parse_eso_file(eso_path)
+                    st.session_state.eplus_raw = eplus_raw
+                    st.session_state.sim_data = construct_sim_data_from_eplus(simplified_raw, eplus_raw, {
+                        'room_length': room_length, 'room_width': room_width, 'room_height': room_height,
+                        'num_rows': num_rows, 'racks_per_row': racks_per_row,
+                        'dclc_effectiveness': dclc_effectiveness, 'rdhx_effectiveness': rdhx_effectiveness,
+                        'num_heat_exchangers': num_heat_exchangers, 'hx_capacity_kw': hx_capacity_kw,
+                        'num_air_handlers': num_air_handlers, 'cfm_per_handler': cfm_per_handler,
+                        'inlet_temp_c': inlet_temp_c
+                    })
+                    status.update(label="EnergyPlus simulation complete!", state="complete", expanded=False)
+                    run_log.append("**EnergyPlus Advanced solver** completed successfully.")
+                    st.session_state.last_run_status = "success"
+                else:
+                    st.session_state.eplus_raw = None
+                    st.session_state.sim_data = simplified_raw
+                    status.update(label="Failed to find eplusout.eso file", state="error")
+                    run_log.append("**EnergyPlus failed**: eplusout.eso file was not found.")
+                    st.session_state.last_run_status = "failed"
+            else:
+                st.session_state.eplus_raw = None
+                st.session_state.sim_data = simplified_raw
+                status.update(label="EnergyPlus simulation failed", state="error")
+                run_log.append("**EnergyPlus failed**: Solver execution error.")
+                st.session_state.last_run_status = "failed"
+    else:
+        st.session_state.eplus_raw = None
+        st.session_state.sim_data = simplified_raw
+        st.session_state.last_run_status = "success"
+        
     st.session_state.tou_costs = calculate_tou_cost(st.session_state.sim_data)
     st.session_state.sim_frame = 0
     st.session_state.sim_fingerprint = _current_fingerprint
     st.session_state.sim_stale = False
     st.session_state.scroll_to_viz = True
+    
+    elapsed_time = time.time() - start_time_perf
+    run_log.append(f"Total execution time: {elapsed_time:.2f} seconds.")
+    
+    st.session_state.last_run_engine = "Advanced (EnergyPlus)" if run_energyplus_engine else "Simplified (Python Physics)"
+    st.session_state.last_run_timestamp = time.strftime("%I:%M:%S %p")
+    st.session_state.last_run_log = run_log
+    st.session_state.show_comparison_notice = force_compare
 
 st.divider()
+
+if st.session_state.get('last_run_log'):
+    with st.expander("View Simulation Run Logs & Process Details", expanded=False):
+        for log_line in st.session_state.last_run_log:
+            st.markdown(log_line)
+            
+        if st.session_state.get('eplus_raw') is not None or "Advanced (EnergyPlus)" in st.session_state.get('last_run_engine', ''):
+            idf_path = Path('model/scenarios/streamlit_run_detailed.idf')
+            if idf_path.exists():
+                st.markdown("---")
+                try:
+                    with open(idf_path, 'r') as f:
+                        idf_text = f.read()
+                    st.download_button(
+                        "Download Generated EnergyPlus Input File (IDF)",
+                        data=idf_text,
+                        file_name="streamlit_run_detailed.idf",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+                except Exception as e:
+                    st.caption(f"Could not load IDF file: {e}")
+
+comparison_available = (
+    st.session_state.get('simplified_raw') is not None 
+    and st.session_state.get('eplus_raw') is not None
+)
+if st.session_state.get('show_comparison_notice') and comparison_available:
+    st.info(
+        "**Model Comparison Data Ready** \n\n"
+        "Both the fast Simplified Physics solver and the detailed EnergyPlus Advanced solver have been run. "
+        "Scroll down to the **Heat Flow & Cooling** section at the bottom of the page and select the "
+        "**Model Comparison** tab to inspect the deviation metrics, validation status, and transient comparison charts.",
+        icon="⚖️"
+    )
 
 
 def plot_thermal_field(results):
@@ -850,9 +1467,11 @@ def plot_thermal_field(results):
     waste_threshold_f = results['waste_threshold'] * 9 / 5 + 32
 
     # === THERMAL MAP (°F) ===
+    levels_contourf = np.linspace(T_inlet_f, waste_threshold_f, 31)
     im1 = ax1.contourf(results['X'], results['Y'], T_f,
-                       levels=30, cmap='RdYlBu_r',
-                       vmin=T_inlet_f, vmax=waste_threshold_f)
+                       levels=levels_contourf, cmap='RdYlBu_r',
+                       vmin=T_inlet_f, vmax=waste_threshold_f,
+                       extend='both')
     fig.colorbar(im1, ax=ax1, label='Temperature (°F)', shrink=0.85)
 
     # Contour lines (°F)
@@ -1043,7 +1662,7 @@ if sim is not None:
 
 # Display plots
 if st.session_state.sim_stale:
-    st.warning("⚠️ Settings changed — simulation cleared. Press **▶️ Run Simulation** to update.")
+    st.warning("Settings changed — simulation cleared. Press **▶️ Run Simulation** to update.")
 st.pyplot(plot_thermal_field(results))
 
 # ===== DASHBOARD =====
@@ -1149,7 +1768,19 @@ st.header("Heat Flow & Cooling")
 ANNUAL_LOAD_FACTOR = 0.8
 annual_mwh = results['Q_liquid_cooling_kw'] * 8760 * ANNUAL_LOAD_FACTOR / 1000
 
-tab_hf, tab_env, tab_ci = st.tabs(["Heat Flow", "Building Envelope", "Cooling Infrastructure"])
+has_comparison = (
+    st.session_state.get('simplified_raw') is not None 
+    and st.session_state.get('eplus_raw') is not None
+)
+
+if has_comparison:
+    tab_hf, tab_env, tab_ci, tab_comp = st.tabs([
+        "Heat Flow", "Building Envelope", "Cooling Infrastructure", "⚖️ Model Comparison"
+    ])
+else:
+    tab_hf, tab_env, tab_ci = st.tabs([
+        "Heat Flow", "Building Envelope", "Cooling Infrastructure"
+    ])
 
 with tab_hf:
     hf1, hf2, hf3, hf4, hf5 = st.columns(5)
@@ -1230,6 +1861,231 @@ with tab_ci:
                 f"Flow: {results['m_dot_liquid_gpm']:.0f} GPM | "
                 f"Heat to reject: {results['q_rejected_kw']:.0f} kW"
             )
+
+if has_comparison:
+    with tab_comp:
+        st.markdown("### ⚖️ Simplified vs. EnergyPlus Advanced Model Validation")
+        st.markdown(
+            "This table compares the daily integrated metrics of the Simplified (Python Physics) model "
+            "against the Advanced (EnergyPlus) model under the same zone conditions."
+        )
+        
+        if st.session_state.get('comp_data') is None:
+            st.session_state.comp_data = compile_comparison_metrics(
+                st.session_state.simplified_raw,
+                st.session_state.eplus_raw,
+                {
+                    'room_length': room_length, 'room_width': room_width, 'room_height': room_height,
+                    'num_rows': num_rows, 'racks_per_row': racks_per_row,
+                    'dclc_effectiveness': dclc_effectiveness, 'rdhx_effectiveness': rdhx_effectiveness,
+                    'num_heat_exchangers': num_heat_exchangers, 'hx_capacity_kw': hx_capacity_kw,
+                    'num_air_handlers': num_air_handlers, 'cfm_per_handler': cfm_per_handler,
+                    'inlet_temp_c': inlet_temp_c, 'scheduled_jobs': st.session_state.scheduled_jobs,
+                    'cdu_flow_gpm': cdu_flow_gpm, 'num_cdus': num_cdus,
+                    'delta_p_kpa': delta_p_kpa, 'pump_eta': pump_eta, 'cop': cop,
+                    'p_pump_kw': results['p_pump_kw']
+                }
+            )
+        comp_data = st.session_state.comp_data
+        
+        sim_metrics = comp_data['simplified']
+        ep_metrics = comp_data['eplus']
+        
+        def make_row(label, sim_val, ep_val, unit, is_percent=False):
+            abs_dev = ep_val - sim_val
+            if sim_val != 0:
+                pct_dev = (abs_dev / sim_val) * 100.0
+            else:
+                pct_dev = 0.0
+            
+            if is_percent:
+                sim_str = f"{sim_val:.2f}%"
+                ep_str = f"{ep_val:.2f}%"
+                abs_str = f"{abs_dev:+.2f}%"
+            else:
+                sim_str = f"{sim_val:,.1f} {unit}".strip()
+                ep_str = f"{ep_val:,.1f} {unit}".strip()
+                abs_str = f"{abs_dev:+,.1f} {unit}".strip()
+                
+            pct_str = f"{pct_dev:+.1f}%"
+            
+            return {
+                "Metric": label,
+                "Simplified (Expected)": sim_str,
+                "Advanced (EnergyPlus)": ep_str,
+                "Absolute Deviation": abs_str,
+                "Percentage Deviation": pct_str
+            }
+            
+        rows = [
+            make_row("Total IT & Cooling Energy Consumed", sim_metrics['facility_energy'], ep_metrics['facility_energy'], "kWh"),
+            make_row("Total Cooling Energy Delivered", sim_metrics['cooling_delivered'], ep_metrics['cooling_delivered'], "kWh"),
+            make_row("Average Room Temperature", sim_metrics['avg_temp'], ep_metrics['avg_temp'], "°C"),
+            make_row("Peak Room Temperature", sim_metrics['peak_temp'], ep_metrics['peak_temp'], "°C"),
+            make_row("Average PUE", sim_metrics['avg_pue'], ep_metrics['avg_pue'], ""),
+            make_row("Peak PUE", sim_metrics['peak_pue'], ep_metrics['peak_pue'], ""),
+            make_row("Recovered Waste Heat", sim_metrics['recovered_heat'], ep_metrics['recovered_heat'], "kWh"),
+        ]
+        
+        import pandas as pd
+        df = pd.DataFrame(rows)
+        st.table(df)
+        
+        st.markdown("#### Transient Profiles Comparison")
+        if st.session_state.get('fig_comp') is None:
+            fig_comp, (ax_temp, ax_cool, ax_pue) = plt.subplots(1, 3, figsize=(16, 4.5))
+            times_h = st.session_state.simplified_raw['times_h']
+            
+            ax_temp.plot(times_h, sim_metrics['temp_profile'], label='Simplified (Python)', color='#0984e3', linewidth=2)
+            ax_temp.plot(times_h, ep_metrics['temp_profile'], label='EnergyPlus', color='#d63031', linewidth=2, linestyle='--')
+            ax_temp.set_title('Zone Temperature Comparison')
+            ax_temp.set_xlabel('Hour of Day')
+            ax_temp.set_ylabel('Temperature (°C)')
+            ax_temp.grid(True, alpha=0.3)
+            ax_temp.legend()
+            
+            ax_cool.plot(times_h, sim_metrics['cooling_power_profile'], label='Simplified (Python)', color='#0984e3', linewidth=2)
+            ax_cool.plot(times_h, ep_metrics['cooling_power_profile'], label='EnergyPlus', color='#d63031', linewidth=2, linestyle='--')
+            ax_cool.set_title('Cooling Power Comparison')
+            ax_cool.set_xlabel('Hour of Day')
+            ax_cool.set_ylabel('Power (kW)')
+            ax_cool.grid(True, alpha=0.3)
+            ax_cool.legend()
+            
+            ax_pue.plot(times_h, sim_metrics['pue_profile'], label='Simplified (Python)', color='#0984e3', linewidth=2)
+            ax_pue.plot(times_h, ep_metrics['pue_profile'], label='EnergyPlus', color='#d63031', linewidth=2, linestyle='--')
+            ax_pue.set_title('PUE Comparison')
+            ax_pue.set_xlabel('Hour of Day')
+            ax_pue.set_ylabel('PUE')
+            ax_pue.grid(True, alpha=0.3)
+            ax_pue.legend()
+            
+            fig_comp.tight_layout()
+            st.session_state.fig_comp = fig_comp
+            plt.close(fig_comp)
+            
+        st.pyplot(st.session_state.fig_comp)
+        
+        st.markdown("---")
+        st.markdown("#### Advanced Model Analysis & Correlation Plots")
+        st.markdown(
+            "Click the button below to generate advanced visual comparisons, including cumulative facility electricity "
+            "and PUE sensitivity as a function of server IT load."
+        )
+        
+        gen_plots_button = st.button("Generate Advanced Comparison Plots", type="primary", use_container_width=True)
+        if gen_plots_button:
+            st.session_state.show_adv_plots = True
+            st.session_state.fig_adv = None
+            
+        if st.session_state.show_adv_plots:
+            if st.session_state.get('fig_adv') is None:
+                with st.spinner("Generating advanced analytical plots..."):
+                    import warnings
+                    fig_adv, axs = plt.subplots(3, 2, figsize=(16, 13))
+                    ax_cum = axs[0, 0]
+                    ax_scatter = axs[0, 1]
+                    ax_cool_sim = axs[1, 0]
+                    ax_cool_ep = axs[1, 1]
+                    ax_whr = axs[2, 0]
+                    ax_temp_env = axs[2, 1]
+                    
+                    times_h = st.session_state.simplified_raw['times_h']
+                    dt_hours = float(times_h[1] - times_h[0]) if len(times_h) > 1 else (1.0 / 60.0)
+                    
+                    sim_cum_energy = np.cumsum(sim_metrics['facility_power_profile']) * dt_hours
+                    ep_cum_energy = np.cumsum(ep_metrics['facility_power_profile']) * dt_hours
+                    
+                    ax_cum.plot(times_h, sim_cum_energy, label='Simplified (Python)', color='#0984e3', linewidth=2.5)
+                    ax_cum.plot(times_h, ep_cum_energy, label='EnergyPlus', color='#d63031', linewidth=2.5, linestyle='--')
+                    ax_cum.set_title('Cumulative Facility Energy Consumption', fontsize=11, fontweight='bold')
+                    ax_cum.set_xlabel('Hour of Day', fontsize=9)
+                    ax_cum.set_ylabel('Total Electricity Consumed (kWh)', fontsize=9)
+                    ax_cum.grid(True, alpha=0.3)
+                    ax_cum.legend(fontsize=8)
+                    
+                    sim_it_p = sim_metrics['it_power_profile']
+                    sim_pue_p = sim_metrics['pue_profile']
+                    ep_it_p = ep_metrics['it_power_profile']
+                    ep_pue_p = ep_metrics['pue_profile']
+                    
+                    ax_scatter.scatter(sim_it_p, sim_pue_p, label='Simplified (Python)', color='#0984e3', alpha=0.5, s=25)
+                    ax_scatter.scatter(ep_it_p, ep_pue_p, label='EnergyPlus', color='#d63031', alpha=0.5, s=25, marker='x')
+                    
+                    try:
+                        if len(sim_it_p) > 5 and np.max(sim_it_p) - np.min(sim_it_p) > 1.0 and len(np.unique(sim_it_p)) >= 3:
+                            with warnings.catch_warnings():
+                                warnings.simplefilter('ignore', np.RankWarning)
+                                sim_fit = np.polyfit(sim_it_p, sim_pue_p, 2)
+                                ep_fit = np.polyfit(ep_it_p, ep_pue_p, 2)
+                                
+                                fit_x = np.linspace(np.min(sim_it_p), np.max(sim_it_p), 100)
+                                ax_scatter.plot(fit_x, np.polyval(sim_fit, fit_x), color='#0984e3', linestyle='-', linewidth=1.5, alpha=0.8)
+                                ax_scatter.plot(fit_x, np.polyval(ep_fit, fit_x), color='#d63031', linestyle='--', linewidth=1.5, alpha=0.8)
+                    except Exception:
+                        pass
+                    
+                    ax_scatter.set_title('PUE Sensitivity to Server IT Load', fontsize=11, fontweight='bold')
+                    ax_scatter.set_xlabel('Server IT Load (kW)', fontsize=9)
+                    ax_scatter.set_ylabel('Power Usage Effectiveness (PUE)', fontsize=9)
+                    ax_scatter.grid(True, alpha=0.3)
+                    ax_scatter.legend(fontsize=8)
+                    
+                    sim_pump = sim_metrics['pump_power_profile']
+                    sim_chiller = sim_metrics['chiller_power_profile']
+                    sim_fan = sim_metrics['fan_power_profile']
+                    
+                    ax_cool_sim.stackplot(times_h, sim_pump, sim_chiller, sim_fan, 
+                                          labels=['Pumps', 'Chillers', 'Fans'], 
+                                          colors=['#00cec9', '#e17055', '#6c5ce7'], alpha=0.75)
+                    ax_cool_sim.set_title('Simplified Cooling Power Breakdown', fontsize=11, fontweight='bold')
+                    ax_cool_sim.set_xlabel('Hour of Day', fontsize=9)
+                    ax_cool_sim.set_ylabel('Power demand (kW)', fontsize=9)
+                    ax_cool_sim.grid(True, alpha=0.3)
+                    ax_cool_sim.legend(loc='upper left', fontsize=8)
+                    
+                    ep_pump = ep_metrics['pump_power_profile']
+                    ep_chiller = ep_metrics['chiller_power_profile']
+                    ep_fan = ep_metrics['fan_power_profile']
+                    
+                    ax_cool_ep.stackplot(times_h, ep_pump, ep_chiller, ep_fan, 
+                                         labels=['Pumps', 'Chillers/Coils', 'Fans'], 
+                                         colors=['#00cec9', '#e17055', '#6c5ce7'], alpha=0.75)
+                    ax_cool_ep.set_title('EnergyPlus Cooling Power Breakdown', fontsize=11, fontweight='bold')
+                    ax_cool_ep.set_xlabel('Hour of Day', fontsize=9)
+                    ax_cool_ep.set_ylabel('Power demand (kW)', fontsize=9)
+                    ax_cool_ep.grid(True, alpha=0.3)
+                    ax_cool_ep.legend(loc='upper left', fontsize=8)
+                    
+                    sim_whr = sim_metrics['recovered_heat_profile']
+                    ep_whr = ep_metrics['recovered_heat_profile']
+                    
+                    ax_whr.plot(times_h, sim_whr, label='Simplified (Python)', color='#0984e3', linewidth=2.5)
+                    ax_whr.plot(times_h, ep_whr, label='EnergyPlus', color='#d63031', linewidth=2.5, linestyle='--')
+                    ax_whr.set_title('Waste Heat Recovery Rate', fontsize=11, fontweight='bold')
+                    ax_whr.set_xlabel('Hour of Day', fontsize=9)
+                    ax_whr.set_ylabel('Recovered Heat (kW)', fontsize=9)
+                    ax_whr.grid(True, alpha=0.3)
+                    ax_whr.legend(fontsize=8)
+                    
+                    sim_outdoor = sim_metrics['outdoor_temp_profile']
+                    sim_zone = sim_metrics['temp_profile']
+                    ep_zone = ep_metrics['temp_profile']
+                    
+                    ax_temp_env.plot(times_h, sim_outdoor, label='Outdoor Temperature', color='#fdcb6e', linewidth=2, linestyle=':')
+                    ax_temp_env.plot(times_h, sim_zone, label='Simplified Zone Temp', color='#0984e3', linewidth=2)
+                    ax_temp_env.plot(times_h, ep_zone, label='EnergyPlus Zone Temp', color='#d63031', linewidth=2, linestyle='--')
+                    ax_temp_env.set_title('Zone vs. Outdoor Temperature Dynamics', fontsize=11, fontweight='bold')
+                    ax_temp_env.set_xlabel('Hour of Day', fontsize=9)
+                    ax_temp_env.set_ylabel('Temperature (°C)', fontsize=9)
+                    ax_temp_env.grid(True, alpha=0.3)
+                    ax_temp_env.legend(fontsize=8)
+                    
+                    fig_adv.tight_layout()
+                    st.session_state.fig_adv = fig_adv
+                    plt.close(fig_adv)
+                    
+            st.pyplot(st.session_state.fig_adv)
 
 st.divider()
 

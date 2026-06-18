@@ -306,13 +306,29 @@ if results is not None:
 
     sorted_jobs = sorted(sched, key=lambda j: (j["start_time"], j["power_kw"]))
 
+    def jobs_overlap(j1, j2):
+        if j1["end_time"] <= 24.0:
+            int1 = [(j1["start_time"], j1["end_time"])]
+        else:
+            int1 = [(j1["start_time"], 24.0), (0.0, j1["end_time"] - 24.0)]
+            
+        if j2["end_time"] <= 24.0:
+            int2 = [(j2["start_time"], j2["end_time"])]
+        else:
+            int2 = [(j2["start_time"], 24.0), (0.0, j2["end_time"] - 24.0)]
+            
+        for s1, e1 in int1:
+            for s2, e2 in int2:
+                if max(s1, s2) < min(e1, e2) - 1e-5:
+                    return True
+        return False
+
     # Build rows: bin jobs by overlapping time so they stack vertically
     rows: list[list[dict]] = []
     for job in sorted_jobs:
         placed = False
         for row in rows:
-            if all(job["start_time"] >= rj["end_time"] or job["end_time"] <= rj["start_time"]
-                   for rj in row):
+            if not any(jobs_overlap(job, rj) for rj in row):
                 row.append(job)
                 placed = True
                 break
@@ -326,24 +342,40 @@ if results is not None:
     gap_px = 4
     for row_idx in range(n_rows_vis):
         for job in rows[row_idx]:
-            left_pct = (job["start_time"] / 24) * 100
-            width_pct = max(0.4, (job["duration"] / 24) * 100)
-            top_px = row_idx * (row_height_px + gap_px)
-            tier_class = (
-                "job-low" if "Low" in job["power_level"]
-                else "job-medium" if "Medium" in job["power_level"]
-                else "job-high"
-            )
-            dot = "🟢" if "Low" in job["power_level"] else ("🟡" if "Medium" in job["power_level"] else "🔴")
-            job_blocks_html += (
-                f'<div class="job-block {tier_class}" '
-                f'style="left:{left_pct:.2f}%;width:{width_pct:.2f}%;'
-                f'top:{top_px}px;height:{row_height_px}px;" '
-                f'title="{job["power_level"]} | {job["start_hour"]:02d}:{job["start_min"]:02d}'
-                f'–{int(job["end_time"]):02d}:{int((job["end_time"]%1)*60):02d}'
-                f' | {job["num_racks"]}R">'
-                f'{dot}</div>'
-            )
+            blocks = []
+            start_h = job["start_time"]
+            end_h = job["end_time"]
+            
+            sh_h = int(start_h)
+            sh_m = int(round((start_h - sh_h) * 60)) % 60
+            eh_h = int(end_h) % 24
+            eh_m = int(round((end_h - int(end_h)) * 60)) % 60
+            time_str = f"{sh_h:02d}:{sh_m:02d}–{eh_h:02d}:{eh_m:02d}"
+            
+            if end_h > 24.0:
+                blocks.append((start_h, 24.0))
+                blocks.append((0.0, end_h - 24.0))
+            else:
+                blocks.append((start_h, end_h))
+                
+            for b_start, b_end in blocks:
+                left_pct = (b_start / 24.0) * 100
+                width_pct = max(0.4, ((b_end - b_start) / 24.0) * 100)
+                top_px = row_idx * (row_height_px + gap_px)
+                tier_class = (
+                    "job-low" if "Low" in job["power_level"]
+                    else "job-medium" if "Medium" in job["power_level"]
+                    else "job-high"
+                )
+                dot = "🟢" if "Low" in job["power_level"] else ("🟡" if "Medium" in job["power_level"] else "🔴")
+                job_blocks_html += (
+                    f'<div class="job-block {tier_class}" '
+                    f'style="left:{left_pct:.2f}%;width:{width_pct:.2f}%;'
+                    f'top:{top_px}px;height:{row_height_px}px;" '
+                    f'title="{job["power_level"]} | {time_str}'
+                    f' | {job["num_racks"]}R">'
+                    f'{dot}</div>'
+                )
 
     hour_labels_html = "".join(f'<div class="tl-hour">{h:02d}</div>' for h in range(24))
     grid_height = n_rows_vis * (row_height_px + gap_px) + 10
